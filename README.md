@@ -6,6 +6,17 @@ Supports both **QoS** (per-VLAN/SSID priority) and **SQM** (Smart Queue Manageme
 
 ---
 
+## Documentation
+
+- [Supported Models](https://github.com/wickedyoda/Glinet-Bandwidth-script/wiki/Supported-Models)
+- [Setup Wizard](https://github.com/wickedyoda/Glinet-Bandwidth-script/wiki/Setup-Wizard)
+- [QoS vs SQM](https://github.com/wickedyoda/Glinet-Bandwidth-script/wiki/QoS-vs-SQM)
+- [Persistence](https://github.com/wickedyoda/Glinet-Bandwidth-script/wiki/Persistence)
+- [Configuration](https://github.com/wickedyoda/Glinet-Bandwidth-script/wiki/Configuration)
+- [Troubleshooting](https://github.com/wickedyoda/Glinet-Bandwidth-script/wiki/Troubleshooting)
+
+---
+
 ## Supported Models & Firmware
 
 | Model | Firmware | OpenWrt | Kernel | Notes |
@@ -19,6 +30,8 @@ Supports both **QoS** (per-VLAN/SSID priority) and **SQM** (Smart Queue Manageme
 | **GL.iNet Flint 3e / GL-BE6500** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
 
 > The script auto-detects your model. If detection fails, it warns you and asks for confirmation before continuing with Flint 2-safe defaults.
+>
+> Note: When a model is retested after a firmware upgrade, the new firmware version is added alongside the existing entries rather than replacing them.
 
 ---
 
