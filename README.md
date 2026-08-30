@@ -10,6 +10,7 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2** and **GL.iNet F
 |-------|----------|---------|--------|-------|
 | **GL.iNet Flint 3** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
 | **GL.iNet Flint 2** | 4.9.1 | 21.02-SNAPSHOT | 5.4.238 | `tc-tiny`, **no `u32` filters** |
+| **GL.iNet Flint 4 / GL-MT6000 family** | 4.9.1 | 21.02-SNAPSHOT | 5.4.238 | `tc-tiny`, **no `u32` filters** |
 
 > The script auto-detects your model. If detection fails, it falls back to Flint 2-safe settings.
 

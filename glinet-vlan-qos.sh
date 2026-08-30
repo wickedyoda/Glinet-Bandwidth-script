@@ -16,6 +16,7 @@
 # Supported models:
 #   - GL.iNet Flint 3 (OpenWrt 23.05, tc-full)
 #   - GL.iNet Flint 2 (OpenWrt 21.02, tc-tiny, no u32)
+#   - GL.iNet Flint 4 / GL-MT6000 family (Flint 2-class firmware/hardware path)
 #
 # Repo: https://github.com/wickedyoda/Glinet-Bandwidth-script
 #
