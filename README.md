@@ -15,6 +15,24 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2** and **GL.iNet F
 
 ---
 
+## Quick Start
+
+```sh
+# One-liner install
+curl -fsSL https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main/install.sh | sh
+
+# Run interactive setup
+/usr/local/sbin/glinet-vlan-qos-setup.sh
+```
+
+The setup wizard will:
+1. Ask you to select your model or auto-detect
+2. Let you choose persistence mode
+3. Show detected VLANs/SSIDs and let you assign priority order
+4. Apply the configuration and verify it's working
+
+---
+
 ## How It Works
 
 1. **Auto-detects** Flint 2 vs Flint 3 at runtime
@@ -29,92 +47,26 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2** and **GL.iNet F
 
 ---
 
-## Quick Install
+## Files
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main/install.sh | sh
-```
+| File | Purpose |
+|------|---------|
+| `glinet-vlan-qos.sh` | Main QoS engine |
+| `glinet-vlan-qos-setup.sh` | Interactive setup wizard |
+| `install.sh` | One-liner installer |
+| `README.md` | This documentation |
 
 ---
 
 ## Usage
 
 ```sh
-# Start QoS
-glinet-vlan-qos.sh start
+# Run interactive setup
+glinet-vlan-qos-setup.sh
 
-# Stop QoS
-glinet-vlan-qos.sh stop
-
-# Restart QoS
-glinet-vlan-qos.sh restart
-
-# Check status
-glinet-vlan-qos.sh status
-
-# Run model detection
-glinet-vlan-qos.sh detect
-
-# Install persistence hooks
-glinet-vlan-qos.sh install
-
-# Remove persistence hooks
-glinet-vlan-qos.sh uninstall
+# Manual control
+glinet-vlan-qos.sh start|stop|restart|status|detect|install|uninstall
 ```
-
----
-
-## Model Selection
-
-The script auto-detects your model on first run:
-
-```sh
-$ glinet-vlan-qos.sh detect
-Detected model: flint3
-```
-
-### Manual override (optional)
-If auto-detection fails, set the model before starting:
-
-```sh
-export QOS_MODEL=flint2   # or flint3
-glinet-vlan-qos.sh start
-```
-
----
-
-## Configuration
-
-Edit `/etc/gl-qos-vlan.conf` on the router:
-
-```bash
-# Bandwidth limits (kbit/s)
-QOS_LAN_BW_UP=200000          # 200 Mbps
-QOS_LAN_BW_DOWN=500000        # 500 Mbps
-QOS_IOT_BW_UP=50000           # 50 Mbps
-QOS_IOT_BW_DOWN=100000        # 100 Mbps
-QOS_GUEST_BW_UP=20000         # 20 Mbps
-QOS_GUEST_BW_DOWN=50000       # 50 Mbps
-QOS_TAILSCALE_BW_UP=50000     # 50 Mbps
-QOS_TAILSCALE_BW_DOWN=100000  # 100 Mbps
-
-# Enable/disable CAKE leaf qdisc
-CAKE_ENABLE=1
-
-# Persistence mode
-# 1 = auto-start on network changes/boot (GL.iNet hooks + rc.local)
-# 0 = manual only, survives UI changes but not factory reset
-PERSISTENT=1
-```
-
----
-
-## Default Bandwidth by Model
-
-| Model | LAN | IoT | Guest | Tailscale |
-|-------|-----|-----|-------|-----------|
-| **Flint 3** | 200/500 Mbps | 50/100 Mbps | 20/50 Mbps | 50/100 Mbps |
-| **Flint 2** | 100/300 Mbps | 30/80 Mbps | 10/30 Mbps | 30/80 Mbps |
 
 ---
 
@@ -143,6 +95,30 @@ PERSISTENT=1
 
 ---
 
+## Configuration
+
+Edit `/etc/gl-qos-vlan.conf` on the router:
+
+```bash
+# Bandwidth limits (kbit/s)
+QOS_LAN_BW_UP=200000          # 200 Mbps
+QOS_LAN_BW_DOWN=500000        # 500 Mbps
+QOS_IOT_BW_UP=50000           # 50 Mbps
+QOS_IOT_BW_DOWN=100000        # 100 Mbps
+QOS_GUEST_BW_UP=20000         # 20 Mbps
+QOS_GUEST_BW_DOWN=50000       # 50 Mbps
+QOS_TAILSCALE_BW_UP=50000     # 50 Mbps
+QOS_TAILSCALE_BW_DOWN=100000  # 100 Mbps
+
+# Enable/disable CAKE leaf qdisc
+CAKE_ENABLE=1
+
+# Persistence mode
+PERSISTENT=1
+```
+
+---
+
 ## Verification
 
 ```sh
@@ -159,25 +135,6 @@ tc class show dev br-guest
 
 # Verify nft marks
 nft list table inet gl-qos
-
-# Check traffic stats
-tc -s qdisc show dev br-lan
-tc -s class show dev br-lan
-```
-
-Expected output:
-```
-Detected model: flint2
-
-table inet gl-qos {
-    chain preraw {
-        type filter hook prerouting priority mangle; policy accept;
-        iifname "br-iot" meta mark set 0x00020000
-        iifname "br-guest" meta mark set 0x00030000
-        iifname "tailscale0" meta mark set 0x00040000
-        iifname "br-lan" meta mark set 0x00010000
-    }
-}
 ```
 
 ---
@@ -195,56 +152,12 @@ This removes:
 
 ---
 
-## Files Modified
-
-| File | Purpose |
-|------|---------|
-| `/usr/local/sbin/glinet-vlan-qos.sh` | Main script |
-| `/etc/gl-switch.d/vlan-qos.sh` | Network restart hook |
-| `/etc/rc.local` | Boot persistence |
-| `/etc/gl-qos-vlan.conf` | Custom config (optional) |
-
----
-
 ## Requirements
 
 - GL.iNet Flint 2 or Flint 3
 - OpenWrt 21.02+
 - Packages: `tc-full` or `tc-tiny`, `kmod-sched-cake`, `sqm-scripts`
 - Root SSH access
-
----
-
-## Troubleshooting
-
-**Model detection fails:**
-```sh
-# Check board.json
-cat /etc/board.json | grep model
-
-# Manually set model
-export QOS_MODEL=flint2
-glinet-vlan-qos.sh start
-```
-
-**QoS not applying on Flint 2:**
-```sh
-# tc-tiny does not support u32 filters; this is expected
-tc filter show dev br-lan
-
-# Check HTB classes are created
-tc class show dev br-lan
-```
-
-**Persistence not working:**
-```sh
-# Verify hooks are executable
-ls -la /etc/gl-switch.d/vlan-qos.sh
-ls -la /usr/local/sbin/glinet-vlan-qos.sh
-
-# Test manually
-/etc/gl-switch.d/vlan-qos.sh
-```
 
 ---
 

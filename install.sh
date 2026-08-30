@@ -2,10 +2,12 @@
 set -e
 INSTALL_DIR=/usr/local/sbin
 SCRIPT=glinet-vlan-qos.sh
-REMOTE=https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main/${SCRIPT}
+SETUP_SCRIPT=glinet-vlan-qos-setup.sh
+REMOTE=https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main
 mkdir -p ${INSTALL_DIR}
-curl -fsSL "${REMOTE}" -o "${INSTALL_DIR}/${SCRIPT}"
+curl -fsSL "${REMOTE}/${SCRIPT}" -o "${INSTALL_DIR}/${SCRIPT}"
 chmod +x "${INSTALL_DIR}/${SCRIPT}"
-"${INSTALL_DIR}/${SCRIPT}" install
-"${INSTALL_DIR}/${SCRIPT}" start
-echo "Installed ${INSTALL_DIR}/${SCRIPT}"
+curl -fsSL "${REMOTE}/${SETUP_SCRIPT}" -o "${INSTALL_DIR}/${SETUP_SCRIPT}"
+chmod +x "${INSTALL_DIR}/${SETUP_SCRIPT}"
+echo "Installed ${INSTALL_DIR}/${SCRIPT} and ${INSTALL_DIR}/${SETUP_SCRIPT}"
+echo "Run '${INSTALL_DIR}/${SETUP_SCRIPT}' to configure QoS"
