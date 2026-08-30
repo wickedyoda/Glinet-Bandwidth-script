@@ -2,6 +2,8 @@
 
 Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flint 3**, **GL.iNet Flint 4 / GL-BE14000**, **GL.iNet Slate 7**, **GL.iNet Slate 7 Pro**, **GL.iNet Beryl 7**, and **GL.iNet Flint 3e / GL-BE6500** using **HTB + CAKE** on OpenWrt.
 
+Supports both **QoS** (per-VLAN/SSID priority) and **SQM** (Smart Queue Management with CAKE) modes.
+
 ---
 
 ## Supported Models & Firmware
@@ -16,7 +18,7 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flin
 | **GL.iNet Beryl 7 / GL-MT3600BE** | 4.9.0 | 21.02-SNAPSHOT | 5.4.281 | `tc-tiny`, **no `u32` filters** |
 | **GL.iNet Flint 3e / GL-BE6500** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
 
-> The script auto-detects your model. If detection fails, it falls back to Flint 2-safe settings.
+> The script auto-detects your model. If detection fails, it warns you and asks for confirmation before continuing with Flint 2-safe defaults.
 
 ---
 
@@ -31,10 +33,11 @@ curl -fsSL https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/
 ```
 
 The setup wizard will:
-1. Ask you to select your model or auto-detect
-2. Let you choose persistence mode
-3. Show detected VLANs/SSIDs and let you assign priority order
-4. Apply the configuration and verify it's working
+1. Ask you to choose **QoS** or **SQM** mode
+2. Let you select your model or auto-detect
+3. Let you choose persistence mode
+4. Show detected VLANs/SSIDs and let you assign priority order
+5. Apply the configuration and verify it's working
 
 ---
 
@@ -72,6 +75,20 @@ glinet-vlan-qos-setup.sh
 # Manual control
 glinet-vlan-qos.sh start|stop|restart|status|detect|install|uninstall
 ```
+
+---
+
+## Modes
+
+### QoS Mode
+Per-VLAN/SSID priority with HTB + CAKE.
+- Prioritizes LAN, IoT, Guest, and Tailscale by bridge/interface
+- Best for multi-VLAN homes and office networks
+
+### SQM Mode
+Smart Queue Management with CAKE.
+- Simple bandwidth limit per WAN interface
+- Best for bufferbloat reduction on single WAN
 
 ---
 
@@ -180,7 +197,7 @@ This removes:
 
 ## Requirements
 
-- GL.iNet Flint 2, Flint 3, or Flint 4 / GL-MT6000 family
+- GL.iNet Flint 2, Flint 3, Flint 4, Slate 7, Slate 7 Pro, Beryl 7, or Flint 3e
 - OpenWrt 21.02+
 - Packages: `tc-full` or `tc-tiny`, `kmod-sched-cake`, `sqm-scripts`
 - Root SSH access
