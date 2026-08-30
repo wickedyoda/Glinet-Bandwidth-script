@@ -1,6 +1,6 @@
 # GL.iNet Bandwidth Script
 
-Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2** and **GL.iNet Flint 3** using **HTB + CAKE** on OpenWrt.
+Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flint 3**, **GL.iNet Flint 4 / GL-MT6000 family**, **GL.iNet Slate 7**, and **GL.iNet Slate 7 Pro** using **HTB + CAKE** on OpenWrt.
 
 ---
 
@@ -10,6 +10,9 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2** and **GL.iNet F
 |-------|----------|---------|--------|-------|
 | **GL.iNet Flint 3** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
 | **GL.iNet Flint 2** | 4.9.1 | 21.02-SNAPSHOT | 5.4.238 | `tc-tiny`, **no `u32` filters** |
+| **GL.iNet Flint 4 / GL-BE14000** | 4.9.1 | 21.02-SNAPSHOT | 5.4.281 | `tc-tiny`, **no `u32` filters** |
+| **GL.iNet Slate 7** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
+| **GL.iNet Slate 7 Pro / GL-BE10000** | 4.8.4 | 21.02-SNAPSHOT | 5.4.281 | `tc-tiny`, **no `u32` filters** |
 
 > The script auto-detects your model. If detection fails, it falls back to Flint 2-safe settings.
 
@@ -35,7 +38,7 @@ The setup wizard will:
 
 ## How It Works
 
-1. **Auto-detects** Flint 2 vs Flint 3 at runtime
+1. **Auto-detects** Flint 2 / Flint 3 / Flint 4 / Slate 7 / Slate 7 Pro at runtime
 2. **HTB root qdisc** on each bridge/interface
 3. **Priority classes**:
    - Class 10 (`prio 1`): LAN + Tailscale — highest priority
@@ -119,6 +122,16 @@ PERSISTENT=1
 
 ---
 
+## Default Bandwidth by Model
+
+| Model | LAN | IoT | Guest | Tailscale |
+|-------|-----|-----|-------|-----------|
+| **Flint 3** | 200/500 Mbps | 50/100 Mbps | 20/50 Mbps | 50/100 Mbps |
+| **Flint 2** | 100/300 Mbps | 30/80 Mbps | 10/30 Mbps | 30/80 Mbps |
+| **Flint 4 / GL-BE14000** | 100/300 Mbps | 30/80 Mbps | 10/30 Mbps | 30/80 Mbps |
+
+---
+
 ## Verification
 
 ```sh
@@ -152,12 +165,56 @@ This removes:
 
 ---
 
+## Files Modified
+
+| File | Purpose |
+|------|---------|
+| `/usr/local/sbin/glinet-vlan-qos.sh` | Main script |
+| `/etc/gl-switch.d/vlan-qos.sh` | Network restart hook |
+| `/etc/rc.local` | Boot persistence |
+| `/etc/gl-qos-vlan.conf` | Custom config (optional) |
+
+---
+
 ## Requirements
 
-- GL.iNet Flint 2 or Flint 3
+- GL.iNet Flint 2, Flint 3, or Flint 4 / GL-MT6000 family
 - OpenWrt 21.02+
 - Packages: `tc-full` or `tc-tiny`, `kmod-sched-cake`, `sqm-scripts`
 - Root SSH access
+
+---
+
+## Troubleshooting
+
+**Model detection fails:**
+```sh
+# Check board.json
+cat /etc/board.json | grep model
+
+# Manually set model
+export QOS_MODEL=flint2
+glinet-vlan-qos.sh start
+```
+
+**QoS not applying on Flint 2/Flint 4:**
+```sh
+# tc-tiny does not support u32 filters; this is expected
+tc filter show dev br-lan
+
+# Check HTB classes are created
+tc class show dev br-lan
+```
+
+**Persistence not working:**
+```sh
+# Verify hooks are executable
+ls -la /etc/gl-switch.d/vlan-qos.sh
+ls -la /usr/local/sbin/glinet-vlan-qos.sh
+
+# Test manually
+/etc/gl-switch.d/vlan-qos.sh
+```
 
 ---
 
