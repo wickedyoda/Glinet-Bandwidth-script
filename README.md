@@ -247,6 +247,18 @@ ls -la /usr/local/sbin/glinet-vlan-qos.sh
 
 ---
 
+## Disclaimer
+
+> **Use at your own risk.** While we have tested this script on the models and firmware versions listed above, you are solely responsible for any changes made to your router. We are not liable for damages, data loss, or bricked devices resulting from the use of this script.
+>
+> By proceeding, you agree that you understand the risks and accept full responsibility for the outcome.
+>
+> Full disclaimer: [Privacy Policy, Terms of Use, Disclaimer and Limitation of Liability](https://www.wickedyoda.com/privacy-policy-terms-of-use-disclaimer-and-limitation-of-liability/)
+>
+> If you encounter issues, please [open an issue ticket](https://github.com/wickedyoda/Glinet-Bandwidth-script/issues).
+
+---
+
 ## License
 
 GPLv3 — see `LICENSE` for details.
