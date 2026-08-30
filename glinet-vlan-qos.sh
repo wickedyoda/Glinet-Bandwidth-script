@@ -14,9 +14,10 @@
 #   PERSISTENT=0  -> manual/scripted only, survives UI changes but not factory reset
 #
 # Supported models:
-#   - GL.iNet Flint 3 (OpenWrt 23.05, tc-full)
+#   - GL.iNet Flint 3 / Slate 7 (OpenWrt 23.05, tc-full)
 #   - GL.iNet Flint 2 (OpenWrt 21.02, tc-tiny, no u32)
 #   - GL.iNet Flint 4 / GL-MT6000 family (Flint 2-class firmware/hardware path)
+#   - GL.iNet Slate 7 Pro / GL-BE10000 (same device, Flint 2-class firmware/hardware path)
 #
 # Repo: https://github.com/wickedyoda/Glinet-Bandwidth-script
 #
@@ -34,8 +35,8 @@ detect_model() {
   local bid
   bid=$(grep -o '"id": "[^"]*"' /etc/board.json 2>/dev/null | head -1 | sed 's/"id": "//;s/"//') || true
   case "$bid" in
-    glinet,gl-mt6000|glinet,gl-mt2500|glinet,gl-mt3000) echo "flint2" ; return ;;
-    *be9300*|*ipq53*|*glinet,gl-*) echo "flint3" ; return ;;
+    glinet,gl-mt6000|glinet,gl-mt2500|glinet,gl-mt3000|glinet,gl-be10000|glinet,gl-be14000) echo "flint2" ; return ;;
+    *be9300*|*be3600*|*ipq53*|*glinet,gl-*) echo "flint3" ; return ;;
   esac
 
   # Fallback: OpenWrt release target strings

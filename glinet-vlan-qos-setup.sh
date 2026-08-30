@@ -51,10 +51,13 @@ echo ""
 echo "Supported models:"
 echo "  1) GL.iNet Flint 3 (OpenWrt 23.05, tc-full, u32 filters supported)"
 echo "  2) GL.iNet Flint 2 (OpenWrt 21.02, tc-tiny, no u32 filters)"
-echo "  3) Auto-detect"
+echo "  3) GL.iNet Flint 4 / GL-BE14000 (tc-tiny, no u32 filters)"
+echo "  4) GL.iNet Slate 7 Pro / SlateMyBrain (OpenWrt 21.02, tc-tiny, no u32 filters)"
+echo "  5) GL.iNet Slate 7 / slate-7-travel (OpenWrt 23.05, tc-full, u32 filters supported)"
+echo "  6) Auto-detect"
 echo ""
-read -p "Enter your choice [1-3, default: 3]: " model_choice
-model_choice=${model_choice:-3}
+read -p "Enter your choice [1-6, default: 6]: " model_choice
+model_choice=${model_choice:-6}
 
 case "$model_choice" in
   1)
@@ -66,24 +69,36 @@ case "$model_choice" in
     MODEL_NAME="GL.iNet Flint 2"
     ;;
   3)
+    export QOS_MODEL=flint2
+    MODEL_NAME="GL.iNet Flint 4 / GL-BE14000"
+    ;;
+  4)
+    export QOS_MODEL=flint2
+    MODEL_NAME="GL.iNet Slate 7 Pro / SlateMyBrain"
+    ;;
+  5)
+    export QOS_MODEL=flint3
+    MODEL_NAME="GL.iNet Slate 7 / slate-7-travel"
+    ;;
+  6)
     log_info "Auto-detecting model..."
     DETECTED="$($MAIN_SCRIPT detect 2>/dev/null || echo "unknown")"
     if [ "$DETECTED" = "flint3" ]; then
       export QOS_MODEL=flint3
-      MODEL_NAME="GL.iNet Flint 3 (auto-detected)"
+      MODEL_NAME="GL.iNet Flint 3 / Slate 7 (auto-detected)"
     elif [ "$DETECTED" = "flint2" ]; then
       export QOS_MODEL=flint2
-      MODEL_NAME="GL.iNet Flint 2 (auto-detected)"
+      MODEL_NAME="Flint 2-class device (auto-detected)"
     else
       log_warn "Could not auto-detect model, defaulting to Flint 2 (safe defaults)"
       export QOS_MODEL=flint2
-      MODEL_NAME="GL.iNet Flint 2 (default)"
+      MODEL_NAME="Flint 2-class device (default)"
     fi
     ;;
   *)
     log_err "Invalid choice, defaulting to auto-detect"
     export QOS_MODEL=flint2
-    MODEL_NAME="GL.iNet Flint 2 (default)"
+    MODEL_NAME="GL.iNet Flint 2 / Flint 4 family (default)"
     ;;
 esac
 
