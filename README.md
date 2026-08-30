@@ -71,9 +71,6 @@ The setup wizard will:
 ```sh
 # Run interactive setup
 glinet-vlan-qos-setup.sh
-
-# Manual control
-glinet-vlan-qos.sh start|stop|restart|status|detect|install|uninstall
 ```
 
 ---
@@ -239,4 +236,4 @@ ls -la /usr/local/sbin/glinet-vlan-qos.sh
 
 ## License
 
-MIT — feel free to fork and adapt for your GL.iNet setup.
+GPLv3 — see `LICENSE` for details.
