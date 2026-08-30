@@ -45,6 +45,40 @@ echo "  GL.iNet VLAN/SSID QoS Setup Wizard"
 echo "========================================"
 echo ""
 
+# Step 0: Choose QOS or SQM
+log_step "Step 0: Select traffic shaping mode"
+echo ""
+echo "Traffic shaping options:"
+echo "  1) QoS (recommended) - Per-VLAN/SSID priority with HTB + CAKE"
+echo "     - Prioritizes LAN, IoT, Guest, Tailscale by bridge/interface"
+echo "     - Best for multi-VLAN homes and office networks"
+echo ""
+echo "  2) SQM - Smart Queue Management with CAKE"
+echo "     - Simple bandwidth limit per WAN interface"
+echo "     - Best for bufferbloat reduction on single WAN"
+echo ""
+read -p "Enter your choice [1-2, default: 1]: " mode_choice
+mode_choice=${mode_choice:-1}
+
+case "$mode_choice" in
+  1)
+    export QOS_MODE="qos"
+    MODE_NAME="QoS (HTB + CAKE)"
+    ;;
+  2)
+    export QOS_MODE="sqm"
+    MODE_NAME="SQM (CAKE)"
+    ;;
+  *)
+    log_warn "Invalid choice, defaulting to QoS"
+    export QOS_MODE="qos"
+    MODE_NAME="QoS (HTB + CAKE)"
+    ;;
+esac
+
+log_info "Selected mode: $MODE_NAME"
+echo ""
+
 # Step 1: Model Selection
 log_step "Step 1: Select your GL.iNet model"
 echo ""
@@ -326,6 +360,7 @@ echo "  Setup Complete!"
 echo "========================================"
 echo ""
 log_info "Model: $MODEL_NAME"
+log_info "Mode: $MODE_NAME"
 log_info "Persistence: $PERSIST_MODE"
 log_info "Priority order:"
 for config in $PRIORITY_CONFIG; do
