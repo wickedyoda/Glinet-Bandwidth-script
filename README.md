@@ -1,6 +1,6 @@
 # GL.iNet Bandwidth Script
 
-Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flint 3**, **GL.iNet Flint 4 / GL-BE14000**, **GL.iNet Slate 7**, **GL.iNet Slate 7 Pro**, and **GL.iNet Beryl 7** using **HTB + CAKE** on OpenWrt.
+Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flint 3**, **GL.iNet Flint 4 / GL-BE14000**, **GL.iNet Slate 7**, **GL.iNet Slate 7 Pro**, **GL.iNet Beryl 7**, and **GL.iNet Flint 3e / GL-BE6500** using **HTB + CAKE** on OpenWrt.
 
 ---
 
@@ -14,6 +14,7 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flin
 | **GL.iNet Slate 7** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
 | **GL.iNet Slate 7 Pro / GL-BE10000** | 4.8.4 | 21.02-SNAPSHOT | 5.4.281 | `tc-tiny`, **no `u32` filters** |
 | **GL.iNet Beryl 7 / GL-MT3600BE** | 4.9.0 | 21.02-SNAPSHOT | 5.4.281 | `tc-tiny`, **no `u32` filters** |
+| **GL.iNet Flint 3e / GL-BE6500** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
 
 > The script auto-detects your model. If detection fails, it falls back to Flint 2-safe settings.
 
@@ -39,7 +40,7 @@ The setup wizard will:
 
 ## How It Works
 
-1. **Auto-detects** Flint 2 / Flint 3 / Flint 4 / Slate 7 / Slate 7 Pro / Beryl 7 at runtime
+1. **Auto-detects** Flint 2 / Flint 3 / Flint 4 / Slate 7 / Slate 7 Pro / Beryl 7 / Flint 3e at runtime
 2. **HTB root qdisc** on each bridge/interface
 3. **Priority classes**:
    - Class 10 (`prio 1`): LAN + Tailscale — highest priority
