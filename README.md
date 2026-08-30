@@ -1,12 +1,22 @@
 # GL.iNet Flint 3 — VLAN/SSID QoS Script
 
-Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 3** using **HTB + CAKE** on OpenWrt 21.02+.
+Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 3** using **HTB + CAKE** on OpenWrt 23.05.
 
 | VLAN/Bridge | SSIDs | Priority | Default Bandwidth |
 |-------------|-------|----------|-------------------|
 | `br-lan` + `tailscale0` | `FREEPIZZA`, MLO + Tailscale mesh | **Top** | 200/100 Mbps up/down |
 | `br-iot` | `Side_Salad_IOT` | Medium | 50/100 Mbps up/down |
 | `br-guest` | `Cheese_Sticks` (guest) | Low/best-effort | 20/50 Mbps up/down |
+
+---
+
+## Supported Hardware & Firmware
+
+| Device | Firmware | OpenWrt | Kernel |
+|--------|----------|---------|--------|
+| **GL.iNet Flint 3** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 |
+
+> Tested on Flint 3 with MediaTek MT7986. Other GL.iNet models may need interface/bridge name adjustments.
 
 ---
 
@@ -27,14 +37,14 @@ Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 3** using **HTB + C
 
 ### Quick Install (one-liner)
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wickedyoda/glinet-vlan-qos/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main/install.sh | sh
 ```
 
 ### Manual Install
 ```sh
 # Copy script to router
-scp -P 122 glinet-vlan-qos.sh root@john-router:/usr/local/sbin/
-ssh -p 122 root@john-router "chmod +x /usr/local/sbin/glinet-vlan-qos.sh"
+scp -P 122 glinet-vlan-qos.sh root@flint3:/usr/local/sbin/
+ssh -p 122 root@flint3 "chmod +x /usr/local/sbin/glinet-vlan-qos.sh"
 
 # Start QoS
 /usr/local/sbin/glinet-vlan-qos.sh start
@@ -170,8 +180,8 @@ This removes:
 
 ## Requirements
 
-- GL.iNet Flint 3 (or similar MediaTek MT7986 device)
-- OpenWrt 21.02+
+- GL.iNet Flint 3
+- OpenWrt 23.05
 - Packages: `tc-full`, `kmod-sched-cake`, `sqm-scripts`
 - Root SSH access
 
