@@ -1,56 +1,38 @@
-# GL.iNet Flint 3 — VLAN/SSID QoS Script
+# GL.iNet Bandwidth Script
 
-Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 3** using **HTB + CAKE** on OpenWrt 23.05.
-
-| VLAN/Bridge | SSIDs | Priority | Default Bandwidth |
-|-------------|-------|----------|-------------------|
-| `br-lan` + `tailscale0` | `FREEPIZZA`, MLO + Tailscale mesh | **Top** | 200/100 Mbps up/down |
-| `br-iot` | `Side_Salad_IOT` | Medium | 50/100 Mbps up/down |
-| `br-guest` | `Cheese_Sticks` (guest) | Low/best-effort | 20/50 Mbps up/down |
+Per-VLAN and per-SSID bandwidth priority for **GL.iNet Flint 2** and **GL.iNet Flint 3** using **HTB + CAKE** on OpenWrt.
 
 ---
 
-## Supported Hardware & Firmware
+## Supported Models & Firmware
 
-| Device | Firmware | OpenWrt | Kernel |
-|--------|----------|---------|--------|
-| **GL.iNet Flint 3** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 |
+| Model | Firmware | OpenWrt | Kernel | Notes |
+|-------|----------|---------|--------|-------|
+| **GL.iNet Flint 3** | 4.9.0 | 23.05-SNAPSHOT | 5.4.213 | `tc-full`, supports `u32` filters |
+| **GL.iNet Flint 2** | 4.9.1 | 21.02-SNAPSHOT | 5.4.238 | `tc-tiny`, **no `u32` filters** |
 
-> Tested on Flint 3 with MediaTek MT7986. Other GL.iNet models may need interface/bridge name adjustments.
+> The script auto-detects your model. If detection fails, it falls back to Flint 2-safe settings.
 
 ---
 
 ## How It Works
 
-1. **HTB root qdisc** on each bridge/interface
-2. **Priority classes**:
+1. **Auto-detects** Flint 2 vs Flint 3 at runtime
+2. **HTB root qdisc** on each bridge/interface
+3. **Priority classes**:
    - Class 10 (`prio 1`): LAN + Tailscale — highest priority
    - Class 20 (`prio 2`): IoT — medium priority
    - Class 30 (`prio 3`): Guest — lowest priority
-3. **CAKE leaf qdisc** for smart queue management
-4. **nft marks** by ingress interface for traffic classification
-5. **Persistence** via `/etc/gl-switch.d/` + `/etc/rc.local`
+4. **CAKE leaf qdisc** for smart queue management
+5. **nft marks** by ingress interface for traffic classification
+6. **Persistence** via `/etc/gl-switch.d/` + `/etc/rc.local`
 
 ---
 
-## Installation
+## Quick Install
 
-### Quick Install (one-liner)
 ```sh
 curl -fsSL https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main/install.sh | sh
-```
-
-### Manual Install
-```sh
-# Copy script to router
-scp -P 122 glinet-vlan-qos.sh root@flint3:/usr/local/sbin/
-ssh -p 122 root@flint3 "chmod +x /usr/local/sbin/glinet-vlan-qos.sh"
-
-# Start QoS
-/usr/local/sbin/glinet-vlan-qos.sh start
-
-# Install persistence hooks
-/usr/local/sbin/glinet-vlan-qos.sh install
 ```
 
 ---
@@ -70,11 +52,33 @@ glinet-vlan-qos.sh restart
 # Check status
 glinet-vlan-qos.sh status
 
+# Run model detection
+glinet-vlan-qos.sh detect
+
 # Install persistence hooks
 glinet-vlan-qos.sh install
 
 # Remove persistence hooks
 glinet-vlan-qos.sh uninstall
+```
+
+---
+
+## Model Selection
+
+The script auto-detects your model on first run:
+
+```sh
+$ glinet-vlan-qos.sh detect
+Detected model: flint3
+```
+
+### Manual override (optional)
+If auto-detection fails, set the model before starting:
+
+```sh
+export QOS_MODEL=flint2   # or flint3
+glinet-vlan-qos.sh start
 ```
 
 ---
@@ -105,6 +109,25 @@ PERSISTENT=1
 
 ---
 
+## Default Bandwidth by Model
+
+| Model | LAN | IoT | Guest | Tailscale |
+|-------|-----|-----|-------|-----------|
+| **Flint 3** | 200/500 Mbps | 50/100 Mbps | 20/50 Mbps | 50/100 Mbps |
+| **Flint 2** | 100/300 Mbps | 30/80 Mbps | 10/30 Mbps | 30/80 Mbps |
+
+---
+
+## Priority Order
+
+| Priority | Bridge/Interface | Traffic Type |
+|----------|------------------|--------------|
+| **Top** | `br-lan` + `tailscale0` | LAN + Tailscale mesh |
+| **Medium** | `br-iot` | IoT devices |
+| **Low** | `br-guest` | Guest network |
+
+---
+
 ## Persistence Options
 
 ### Option 1: Persistent through firmware upgrades (`PERSISTENT=1`, default)
@@ -126,6 +149,9 @@ PERSISTENT=1
 # Check QoS status
 glinet-vlan-qos.sh status
 
+# Verify detected model
+glinet-vlan-qos.sh detect
+
 # Verify HTB classes
 tc class show dev br-lan
 tc class show dev br-iot
@@ -141,6 +167,8 @@ tc -s class show dev br-lan
 
 Expected output:
 ```
+Detected model: flint2
+
 table inet gl-qos {
     chain preraw {
         type filter hook prerouting priority mangle; policy accept;
@@ -180,25 +208,32 @@ This removes:
 
 ## Requirements
 
-- GL.iNet Flint 3
-- OpenWrt 23.05
-- Packages: `tc-full`, `kmod-sched-cake`, `sqm-scripts`
+- GL.iNet Flint 2 or Flint 3
+- OpenWrt 21.02+
+- Packages: `tc-full` or `tc-tiny`, `kmod-sched-cake`, `sqm-scripts`
 - Root SSH access
 
 ---
 
 ## Troubleshooting
 
-**QoS not applying:**
+**Model detection fails:**
 ```sh
-# Check if tc is installed
-which tc || opkg install tc-full
+# Check board.json
+cat /etc/board.json | grep model
 
-# Check if cake module is loaded
-lsmod | grep cake || modprobe sch_cake
+# Manually set model
+export QOS_MODEL=flint2
+glinet-vlan-qos.sh start
+```
 
-# Check logs
-logread | grep glinet-vlan-qos
+**QoS not applying on Flint 2:**
+```sh
+# tc-tiny does not support u32 filters; this is expected
+tc filter show dev br-lan
+
+# Check HTB classes are created
+tc class show dev br-lan
 ```
 
 **Persistence not working:**
