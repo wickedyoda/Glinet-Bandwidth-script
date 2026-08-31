@@ -3,7 +3,7 @@ set -e
 INSTALL_DIR=/usr/local/sbin
 SCRIPT=glinet-vlan-qos.sh
 SETUP_SCRIPT=glinet-vlan-qos-setup.sh
-REMOTE=https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/main
+REMOTE=https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/master
 mkdir -p ${INSTALL_DIR}
 curl -fsSL "${REMOTE}/${SCRIPT}" -o "${INSTALL_DIR}/${SCRIPT}"
 chmod +x "${INSTALL_DIR}/${SCRIPT}"
