@@ -26,6 +26,15 @@ has_nft() { command -v nft >/dev/null 2>&1; }
 # ---------- Model detection ----------
 detect_model() {
   local board
+  if [ -n "${QOS_MODEL:-}" ] && [ "${QOS_MODEL}" != "unknown" ]; then
+    MODEL="$QOS_MODEL"
+    USE_U32_FILTERS=0
+    case "$MODEL" in
+      flint3|flint3e|slate7|slate7pro|beryl7) USE_U32_FILTERS=1 ;;
+    esac
+    echo "Configured model: $MODEL"
+    return 0
+  fi
   board=$(cat /etc/board.json 2>/dev/null || echo '{}')
   case "$board" in
     *'"glinet,gl-be14000"'*|*'"glinet,gl-mt6000"'*) MODEL="flint2"; USE_U32_FILTERS=0 ;;
@@ -237,6 +246,10 @@ install() {
 uninstall() {
   stop_qos || true
   rm -f /usr/local/sbin/glinet-vlan-qos.sh /usr/local/sbin/glinet-vlan-qos-setup.sh
+  if [ -f /etc/rc.local ]; then
+    sed -i '/# VLAN QoS persistence/{N;N;N;d;}' /etc/rc.local
+  fi
+  rm -f /etc/sysupgrade.conf.d/glinet-qos.conf /etc/gl-switch.d/vlan-qos.sh
   log_info "Uninstalled glinet-vlan-qos scripts"
 }
 

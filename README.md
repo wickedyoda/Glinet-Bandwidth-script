@@ -70,6 +70,9 @@ glinet-vlan-qos-setup.sh
 
 # Manual control
 glinet-vlan-qos.sh start|stop|restart|status|detect
+
+# Uninstall
+glinet-vlan-qos-setup.sh uninstall
 ```
 
 ---
