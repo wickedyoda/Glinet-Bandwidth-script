@@ -1,327 +1,258 @@
 #!/bin/sh
-#
-# glinet-vlan-qos.sh — Per-VLAN/SSID QoS for GL.iNet Flint 2 / Flint 3
-# Uses HTB root on main bridges, then fq_codel/cake leaf classes.
-# Automatically detects model and skips u32 filters on Flint 2.
-#
-# Usage:
-#   glinet-vlan-qos.sh start|stop|restart|status
-#   glinet-vlan-qos.sh install|uninstall
-#   glinet-vlan-qos.sh detect   # show detected model
-#
-# Persistence options:
-#   PERSISTENT=1  -> restore on boot via rc.local + gl-switch.d
-#   PERSISTENT=0  -> manual/scripted only, survives UI changes but not factory reset
-#
-# Supported models:
-#   - GL.iNet Flint 3 / Slate 7 (OpenWrt 23.05, tc-full)
-#   - GL.iNet Flint 2 (OpenWrt 21.02, tc-tiny, no u32)
-#   - GL.iNet Flint 4 / GL-BE14000 (Flint 2-class firmware/hardware path)
-#   - GL.iNet Slate 7 Pro / GL-BE10000 (same device, Flint 2-class firmware/hardware path)
-#   - GL.iNet Beryl 7 / GL-MT3600BE (OpenWrt 21.02, tc-tiny, no u32)
-#   - GL.iNet Flint 3e / GL-BE6500 (OpenWrt 23.05, tc-full)
-#
-# Repo: https://github.com/wickedyoda/Glinet-Bandwidth-script
-#
+# glinet-vlan-qos.sh - Per-VLAN/SSID bandwidth priority for GL.iNet routers
+# WAN-rooted HTB + optional bridge shaping + SQM mode
+# GPLv3 - see LICENSE
 
-set -u
+set -euo pipefail
 
-SCRIPT_NAME="$(basename "$0")"
-STATE_DIR="/var/run/${SCRIPT_NAME%.sh}"
-CONF_FILE="/etc/config/${SCRIPT_NAME%.sh}"
-[ -f /etc/gl-qos-vlan.conf ] && CONF_FILE="/etc/gl-qos-vlan.conf"
+MAIN_SCRIPT="/usr/local/sbin/glinet-vlan-qos.sh"
+CONF_FILE="/etc/gl-qos-vlan.conf"
+LOG_TAG="gl-qos"
+MODEL=""
+USE_U32_FILTERS=0
+WAN_IF="eth0"
+WAN_BW_UP=0
+WAN_BW_DOWN=0
+QOS_MODE="qos"
+PERSISTENT=0
+CAKE_ENABLE=1
 
-# ---------- Model detection ----------
-detect_model() {
-  # Preferred: board.json model id, available on most GL.iNet builds
-  local bid
-  bid=$(grep -o '"id": "[^"]*"' /etc/board.json 2>/dev/null | head -1 | sed 's/"id": "//;s/"//') || true
-  case "$bid" in
-    glinet,gl-mt6000|glinet,gl-mt2500|glinet,gl-mt3000|glinet,gl-be10000|glinet,gl-be14000|glinet,gl-mt3600be) echo "flint2" ; return ;;
-    *be9300*|*be3600*|*be6500*|*ipq53*|*glinet,gl-*) echo "flint3" ; return ;;
-  esac
-
-  # Fallback: OpenWrt release target strings
-  if grep -q "ipq53xx" /etc/openwrt_release 2>/dev/null; then
-    echo "flint3"
-  elif grep -q "mediatek/mt7986" /etc/openwrt_release 2>/dev/null; then
-    echo "flint2"
-  elif [ -f /etc/glversion ]; then
-    local ver
-    ver=$(cat /etc/glversion 2>/dev/null || echo "")
-    case "$ver" in
-      4.[89].*|4.[0-8].*) echo "flint2" ;;
-      *) echo "unknown" ;;
-    esac
-  else
-    echo "unknown"
-  fi
-}
-
-MODEL="$(detect_model)"
-
-# ---------- Model-specific tunables ----------
-case "$MODEL" in
-  flint3)
-    : "${QOS_LAN_BW_UP:=200000}"
-    : "${QOS_LAN_BW_DOWN:=500000}"
-    : "${QOS_IOT_BW_UP:=50000}"
-    : "${QOS_IOT_BW_DOWN:=100000}"
-    : "${QOS_GUEST_BW_UP:=20000}"
-    : "${QOS_GUEST_BW_DOWN:=50000}"
-    : "${QOS_TAILSCALE_BW_UP:=50000}"
-    : "${QOS_TAILSCALE_BW_DOWN:=100000}"
-    : "${USE_U32_FILTERS:=1}"
-    ;;
-  flint2)
-    : "${QOS_LAN_BW_UP:=100000}"
-    : "${QOS_LAN_BW_DOWN:=300000}"
-    : "${QOS_IOT_BW_UP:=30000}"
-    : "${QOS_IOT_BW_DOWN:=80000}"
-    : "${QOS_GUEST_BW_UP:=10000}"
-    : "${QOS_GUEST_BW_DOWN:=30000}"
-    : "${QOS_TAILSCALE_BW_UP:=30000}"
-    : "${QOS_TAILSCALE_BW_DOWN:=80000}"
-    : "${USE_U32_FILTERS:=0}"
-    ;;
-  *)
-    : "${QOS_LAN_BW_UP:=100000}"
-    : "${QOS_LAN_BW_DOWN:=300000}"
-    : "${QOS_IOT_BW_UP:=30000}"
-    : "${QOS_IOT_BW_DOWN:=80000}"
-    : "${QOS_GUEST_BW_UP:=10000}"
-    : "${QOS_GUEST_BW_DOWN:=30000}"
-    : "${QOS_TAILSCALE_BW_UP:=30000}"
-    : "${QOS_TAILSCALE_BW_DOWN:=80000}"
-    : "${USE_U32_FILTERS:=0}"
-    ;;
-esac
-
-: "${CAKE_ENABLE:=1}"
-: "${PERSISTENT:=1}"
-: "${FWMARK_LAN:=0x00010000}"
-: "${FWMARK_IOT:=0x00020000}"
-: "${FWMARK_GUEST:=0x00030000}"
-: "${FWMARK_TAILSCALE:=0x00040000}"
-
-log_info()  { logger -t "$SCRIPT_NAME" "[INFO] $*"; }
-log_warn()  { logger -t "$SCRIPT_NAME" "[WARN] $*"; }
-log_err()   { logger -t "$SCRIPT_NAME" "[ERROR] $*"; }
+log_info() { logger -t "$LOG_TAG" -p info "INFO: $*"; }
+log_err() { logger -t "$LOG_TAG" -p err "ERR: $*"; echo "ERR: $*" >&2; }
 
 has_tc() { command -v tc >/dev/null 2>&1; }
 has_nft() { command -v nft >/dev/null 2>&1; }
 
-load_conf() {
-  [ -f "$CONF_FILE" ] && . "$CONF_FILE"
+# ---------- Model detection ----------
+detect_model() {
+  local board
+  board=$(cat /etc/board.json 2>/dev/null || echo '{}')
+  case "$board" in
+    *'"glinet,gl-be14000"'*|*'"glinet,gl-mt6000"'*) MODEL="flint2"; USE_U32_FILTERS=0 ;;
+    *'"qcom,ipq5332-ap-mi01.6"'*) MODEL="flint3"; USE_U32_FILTERS=1 ;;
+    *'"glinet,gl-be3600"'*) MODEL="flint3"; USE_U32_FILTERS=1 ;;
+    *'"glinet,gl-be10000"'*) MODEL="flint2"; USE_U32_FILTERS=0 ;;
+    *'"glinet,gl-mt3600be"'*) MODEL="flint2"; USE_U32_FILTERS=0 ;;
+    *'"qcom,ipq5332-ap-mi04.1-v1"'*) MODEL="flint3"; USE_U32_FILTERS=1 ;;
+    *) MODEL="unknown"; USE_U32_FILTERS=0 ;;
+  esac
+  echo "Detected model: $MODEL"
 }
 
-save_mark_rules() {
-  mkdir -p "$STATE_DIR"
-  echo "$1" > "${STATE_DIR}/mark_id"
+# ---------- Config loading ----------
+load_config() {
+  [ -f "$CONF_FILE" ] && . "$CONF_FILE" || true
+  : "${WAN_BW_UP:=0}"
+  : "${WAN_BW_DOWN:=0}"
+  : "${QOS_LAN_BW_UP:=200000}"
+  : "${QOS_LAN_BW_DOWN:=500000}"
+  : "${QOS_IOT_BW_UP:=100000}"
+  : "${QOS_IOT_BW_DOWN:=200000}"
+  : "${QOS_GUEST_BW_UP:=100000}"
+  : "${QOS_GUEST_BW_DOWN:=200000}"
+  : "${QOS_TAILSCALE_BW_UP:=200000}"
+  : "${QOS_TAILSCALE_BW_DOWN:=500000}"
+  : "${QOS_MODE:=qos}"
+  : "${CAKE_ENABLE:=1}"
+  : "${PERSISTENT:=0}"
 }
 
-get_mark_id() {
-  if [ -f "${STATE_DIR}/mark_id" ]; then
-    cat "${STATE_DIR}/mark_id"
-  else
-    echo "0x100"
-  fi
+# ---------- WAN detection ----------
+detect_wan() {
+  local def
+  def=$(ip route show default 2>/dev/null | head -n1 | awk '{print $5}')
+  [ -n "$def" ] && WAN_IF="$def"
+  [ -d "/sys/class/net/$WAN_IF" ] || WAN_IF="eth0"
+  echo "WAN interface: $WAN_IF"
 }
 
+# ---------- HTB helpers ----------
 add_qdisc_htb() {
   local dev="$1" handle="$2" default="$3"
   tc qdisc add dev "$dev" handle "$handle:" root htb default "$default" 2>/dev/null || \
-    tc qdisc change dev "$dev" handle "$handle:" root htb default "$default" 2>/dev/null || true
+    tc qdisc change dev "$dev" handle "$handle:" root htb default "$default" 2>/dev/null || \
+    log_err "Failed to set HTB qdisc on $dev"
 }
 
 add_htb_class() {
   local dev="$1" parent="$2" classid="$3" rate="$4" ceil="$5" burst="$6" prio="$7"
   tc class add dev "$dev" parent "$parent" classid "$classid" htb rate "${rate}kbit" ceil "${ceil}kbit" burst "${burst}" prio "$prio" 2>/dev/null || \
-    tc class change dev "$dev" parent "$parent" classid "$classid" htb rate "${rate}kbit" ceil "${ceil}kbit" burst "${burst}" prio "$prio" 2>/dev/null || true
+    tc class change dev "$dev" parent "$parent" classid "$classid" htb rate "${rate}kbit" ceil "${ceil}kbit" burst "${burst}" prio "$prio" 2>/dev/null || \
+    log_err "Failed to add/change class $classid on $dev"
 }
 
 add_cake_leaf() {
-  local dev="$1" parent="$2" handle="$3" args="$4"
   [ "${CAKE_ENABLE}" != "1" ] && return 0
-  tc qdisc add dev "$dev" parent "$parent" handle "$handle:" cake ethernet atm-overhead $args 2>/dev/null || true
+  local dev="$1" parent="$2" handle="$3" args="$4"
+  tc qdisc add dev "$dev" parent "$parent" handle "$handle:" cake ethernet $args 2>/dev/null || \
+    log_err "Failed to attach CAKE to $dev parent $parent handle $handle"
 }
 
-add_u32_filter() {
-  # Only on Flint 3 / tc-full
-  [ "${USE_U32_FILTERS}" != "1" ] && return 0
-  local dev="$1" parent="$2" pref="$3" src="$4" flowid="$5"
-  tc filter add dev "$dev" parent "$parent" protocol ip pref "$pref" u32 \
-    match ip src "$src" flowid "$flowid" 2>/dev/null || true
+add_fw_filter() {
+  local dev="$1" parent="$2" pref="$3" mark="$4" flowid="$5"
+  [ "$USE_U32_FILTERS" = "1" ] || return 0
+  tc filter add dev "$dev" parent "$parent" protocol ip pref "$pref" handle "$mark" fw flowid "$flowid" 2>/dev/null || \
+    log_err "Failed to add fw filter mark $mark on $dev"
 }
 
-apply_qos() {
+# ---------- nft classification ----------
+setup_nft() {
+  has_nft || return 0
+  nft delete table inet gl-qos 2>/dev/null || true
+  nft 'add table inet gl-qos' 2>/dev/null || true
+  nft 'add chain inet gl-qos mangle_out { type filter hook output priority mangle; policy accept; }' 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_out oifname \"$WAN_IF\" meta mark set 0x10" 2>/dev/null || true
+}
+
+# ---------- Stop / cleanup ----------
+stop_qos() {
+  detect_wan
+  tc qdisc del dev "$WAN_IF" root 2>/dev/null || true
+  [ -d /sys/class/net/br-lan ] && tc qdisc del dev br-lan root 2>/dev/null || true
+  [ -d /sys/class/net/br-iot ] && tc qdisc del dev br-iot root 2>/dev/null || true
+  [ -d /sys/class/net/br-guest ] && tc qdisc del dev br-guest root 2>/dev/null || true
+  [ -d /sys/class/net/tailscale0 ] && tc qdisc del dev tailscale0 root 2>/dev/null || true
+  has_nft && nft delete table inet gl-qos 2>/dev/null || true
+  log_info "Stopped QoS on $WAN_IF"
+}
+
+# ---------- WAN-rooted QoS ----------
+apply_wan_rooted_qos() {
   local action="$1"
+  [ "$WAN_BW_UP" -gt 0 ] || { log_err "WAN_BW_UP not set; cannot apply WAN-rooted QoS"; return 1; }
 
   case "$action" in
     start|restart)
-      if ! has_tc; then
-        log_err "tc not found; install tc-full or tc-tiny"
-        return 1
-      fi
+      stop_qos || true
+      log_info "Applying WAN-rooted QoS on $WAN_IF up=${WAN_BW_UP} down=${WAN_BW_DOWN} mode=$QOS_MODE model=$MODEL"
+      detect_wan
+      setup_nft
 
-      stop >/dev/null 2>&1 || true
+      # Root on WAN egress
+      add_qdisc_htb "$WAN_IF" 1 10
+      add_htb_class "$WAN_IF" 1: 1:1 "$WAN_BW_UP" "$WAN_BW_UP" 1500 1
 
-      log_info "Applying QoS on ${MODEL} (lan=${QOS_LAN_BW_UP}/${QOS_LAN_BW_DOWN} iot=${QOS_IOT_BW_UP}/${QOS_IOT_BW_DOWN} guest=${QOS_GUEST_BW_UP}/${QOS_GUEST_BW_DOWN})"
+      # LAN class
+      add_htb_class "$WAN_IF" 1:1 1:10 "$QOS_LAN_BW_UP" "$WAN_BW_UP" 1500 1
+      add_fw_filter "$WAN_IF" 1: 10 0x10 1:10
+      add_cake_leaf "$WAN_IF" 1:10 10 "besteffort triple-isolate"
 
-      # ---------- br-lan ----------
-      if [ -d /sys/class/net/br-lan ]; then
-        add_qdisc_htb br-lan 1 30
-        add_htb_class br-lan 1: 1:1 "$QOS_LAN_BW_UP" "$QOS_LAN_BW_UP" 1500 1
-        add_htb_class br-lan 1:1 1:10 "$QOS_LAN_BW_UP" "$QOS_LAN_BW_UP" 1500 1
-        add_cake_leaf br-lan 1:10 10 "besteffort triple-isolate"
-        add_htb_class br-lan 1:1 1:20 "$QOS_IOT_BW_UP" "$QOS_IOT_BW_UP" 1500 2
-        add_cake_leaf br-lan 1:20 20 "besteffort"
-        add_htb_class br-lan 1:1 1:30 "$QOS_GUEST_BW_UP" "$QOS_GUEST_BW_UP" 1500 3
-        add_cake_leaf br-lan 1:30 30 "besteffort"
-        tc qdisc add dev br-lan handle ffff: ingress 2>/dev/null || true
-        add_u32_filter br-lan ffff: 10 "192.168.61.0/24" 1:10
-      fi
+      # IoT class
+      add_htb_class "$WAN_IF" 1:1 1:20 "$QOS_IOT_BW_UP" "$WAN_BW_UP" 1500 2
+      add_fw_filter "$WAN_IF" 1: 20 0x20 1:20
+      add_cake_leaf "$WAN_IF" 1:20 20 "besteffort"
 
-      # ---------- br-iot ----------
-      if [ -d /sys/class/net/br-iot ]; then
-        add_qdisc_htb br-iot 2 20
-        add_htb_class br-iot 2: 2:1 "$QOS_IOT_BW_UP" "$QOS_IOT_BW_UP" 1500 2
-        add_htb_class br-iot 2:1 2:20 "$QOS_IOT_BW_UP" "$QOS_IOT_BW_UP" 1500 2
-        add_cake_leaf br-iot 2:20 20 "besteffort"
-      fi
+      # Guest class
+      add_htb_class "$WAN_IF" 1:1 1:30 "$QOS_GUEST_BW_UP" "$WAN_BW_UP" 1500 3
+      add_fw_filter "$WAN_IF" 1: 30 0x30 1:30
+      add_cake_leaf "$WAN_IF" 1:30 30 "besteffort"
 
-      # ---------- br-guest ----------
-      if [ -d /sys/class/net/br-guest ]; then
-        add_qdisc_htb br-guest 3 30
-        add_htb_class br-guest 3: 3:1 "$QOS_GUEST_BW_UP" "$QOS_GUEST_BW_UP" 1500 3
-        add_htb_class br-guest 3:1 3:30 "$QOS_GUEST_BW_UP" "$QOS_GUEST_BW_UP" 1500 3
-        add_cake_leaf br-guest 3:30 30 "besteffort"
-      fi
-
-      # ---------- tailscale0 ----------
+      # Tailscale class
       if [ -d /sys/class/net/tailscale0 ]; then
-        add_qdisc_htb tailscale0 4 40
-        add_htb_class tailscale0 4: 4:1 "$QOS_TAILSCALE_BW_UP" "$QOS_TAILSCALE_BW_UP" 1500 1
-        add_htb_class tailscale0 4:1 4:40 "$QOS_TAILSCALE_BW_UP" "$QOS_TAILSCALE_BW_UP" 1500 1
-        add_cake_leaf tailscale0 4:40 40 "besteffort triple-isolate"
+        add_htb_class "$WAN_IF" 1:1 1:40 "$QOS_TAILSCALE_BW_UP" "$WAN_BW_UP" 1500 1
+        add_fw_filter "$WAN_IF" 1: 40 0x40 1:40
+        add_cake_leaf "$WAN_IF" 1:40 40 "besteffort triple-isolate"
       fi
 
-      # ---------- nft / iptables marks ----------
-      if has_nft; then
-        nft delete table inet gl-qos 2>/dev/null || true
-        nft add table inet gl-qos 2>/dev/null || true
-        nft add chain inet gl-qos preraw { type filter hook prerouting priority mangle \; policy accept \; } 2>/dev/null || true
-        nft add rule inet gl-qos preraw iifname "br-iot" meta mark set "$FWMARK_IOT" 2>/dev/null || true
-        nft add rule inet gl-qos preraw iifname "br-guest" meta mark set "$FWMARK_GUEST" 2>/dev/null || true
-        nft add rule inet gl-qos preraw iifname "tailscale0" meta mark set "$FWMARK_TAILSCALE" 2>/dev/null || true
-        nft add rule inet gl-qos preraw iifname "br-lan" meta mark set "$FWMARK_LAN" 2>/dev/null || true
+      # Optional bridge-level shaping for wired LAN
+      if [ -d /sys/class/net/br-lan ]; then
+        add_qdisc_htb br-lan 2 10
+        add_htb_class br-lan 2: 2:10 "$QOS_LAN_BW_UP" "$WAN_BW_UP" 1500 1
+        add_cake_leaf br-lan 2:10 10 "besteffort"
       fi
-
-      save_mark_rules "$(get_mark_id)"
-      log_info "QoS applied on ${MODEL}. LAN+Tailscale=high, IoT=medium, Guest=low."
       ;;
-
     stop)
-      log_info "Removing HTB+CAKE QoS..."
-
-      for dev in br-lan br-iot br-guest tailscale0; do
-        [ -d /sys/class/net/$dev ] || continue
-        tc qdisc del dev "$dev" root 2>/dev/null || true
-        tc qdisc del dev "$dev" ingress 2>/dev/null || true
-        tc filter del dev "$dev" parent ffff: protocol ip pref 10 u32 2>/dev/null || true
-      done
-
-      if has_nft; then
-        nft delete table inet gl-qos 2>/dev/null || true
-      fi
-
-      rm -rf "$STATE_DIR" 2>/dev/null || true
-      log_info "QoS removed."
-      ;;
-    status)
-      echo "=== Detected model: ${MODEL} ==="
-      echo "=== HTB qdisc ==="
-      for dev in br-lan br-iot br-guest tailscale0; do
-        [ -d /sys/class/net/$dev ] || continue
-        echo "--- $dev ---"
-        tc -s qdisc show dev "$dev" 2>/dev/null | head -3 || echo "  none"
-      done
-      echo "=== nft gl-qos ==="
-      nft list table inet gl-qos 2>/dev/null || echo "  not present"
-      echo "=== TC filters ==="
-      tc filter show dev br-lan 2>/dev/null | grep -E "u32|flowid" | head -5 || echo "  no u32 filters"
-      ;;
-    *)
-      echo "Usage: $0 {start|stop|restart|status|install|uninstall|detect}"
-      exit 1
+      stop_qos
       ;;
   esac
 }
 
-# ---------- GL.iNet boot/network persistence hooks ----------
-install_persistence() {
-  local switch_dir="/etc/gl-switch.d"
-  local hook="${switch_dir}/vlan-qos.sh"
-  local rc_local="/etc/rc.local"
-
-  if [ ! -d "$switch_dir" ]; then
-    log_warn "$switch_dir missing; skipping hook install"
-    return 1
-  fi
-
-  cat > "$hook" <<'RCEOF'
-#!/bin/sh
-# glinet-vlan-qos persistence hook
-if [ -x /usr/local/sbin/glinet-vlan-qos.sh ]; then
-  /usr/local/sbin/glinet-vlan-qos.sh start >/dev/null 2>&1 || true
-fi
-RCEOF
-  chmod +x "$hook"
-  log_info "Installed network hook: $hook"
-
-  if [ -f "$rc_local" ]; then
-    if ! grep -q "glinet-vlan-qos.sh" "$rc_local" 2>/dev/null; then
-      cp "$rc_local" "${rc_local}.bak.$(date +%Y%m%d%H%M%S)"
-      printf '\n# VLAN QoS persistence\nif [ -x /usr/local/sbin/glinet-vlan-qos.sh ]; then\n  /usr/local/sbin/glinet-vlan-qos.sh start >/dev/null 2>&1 || true\nfi\n' >> "$rc_local"
-      log_info "Appended QoS start to $rc_local"
-    fi
-  fi
-
-  if [ "${PERSISTENT}" = "0" ]; then
-    rm -f "$hook" 2>/dev/null || true
-    log_warn "Persistence disabled; QoS will not auto-start on network changes."
-  fi
+# ---------- SQM mode ----------
+apply_sqm() {
+  local action="$1"
+  case "$action" in
+    start|restart)
+      stop_qos || true
+      [ "$WAN_BW_UP" -gt 0 ] || { log_err "WAN_BW_UP not set for SQM"; return 1; }
+      log_info "Applying SQM CAKE diffserv on $WAN_IF at $WAN_BW_UP/$WAN_BW_DOWN kbit"
+      detect_wan
+      local bw="${WAN_BW_UP}kbit"
+      tc qdisc add dev "$WAN_IF" root cake bandwidth "$bw" ethernet diffserv3 2>/dev/null || \
+        tc qdisc change dev "$WAN_IF" root cake bandwidth "$bw" ethernet diffserv3 2>/dev/null || \
+        log_err "Failed to apply SQM CAKE on $WAN_IF"
+      ;;
+    stop)
+      detect_wan
+      tc qdisc del dev "$WAN_IF" root 2>/dev/null || true
+      log_info "Stopped SQM on $WAN_IF"
+      ;;
+  esac
 }
 
-remove_persistence() {
-  rm -f "/etc/gl-switch.d/vlan-qos.sh" 2>/dev/null || true
-  log_info "Removed persistence hook."
+apply_qos() {
+  local action="$1"
+  case "$QOS_MODE" in
+    sqm) apply_sqm "$action" ;;
+    qos|*) apply_wan_rooted_qos "$action" ;;
+  esac
 }
 
-# ---------- main ----------
-load_conf
+# ---------- Status ----------
+status() {
+  echo "=== QoS Status ==="
+  echo "Mode: $QOS_MODE"
+  echo "Model: $MODEL"
+  echo "WAN: $WAN_IF"
+  echo "WAN_BW_UP: $WAN_BW_UP kbit"
+  echo "WAN_BW_DOWN: $WAN_BW_DOWN kbit"
+  echo "--- tc qdisc ---"
+  tc qdisc show dev "$WAN_IF" 2>/dev/null || true
+  [ -d /sys/class/net/br-lan ] && { echo "--- br-lan qdisc ---"; tc qdisc show dev br-lan 2>/dev/null || true; }
+  echo "--- nft ---"
+  has_nft && nft list table inet gl-qos 2>/dev/null || echo "nft not present"
+}
 
+# ---------- Install / uninstall ----------
+install() {
+  install -m 0755 "$MAIN_SCRIPT" /usr/local/sbin/glinet-vlan-qos.sh
+  log_info "Installed $MAIN_SCRIPT to /usr/local/sbin/glinet-vlan-qos.sh"
+}
+
+uninstall() {
+  stop_qos || true
+  rm -f /usr/local/sbin/glinet-vlan-qos.sh /usr/local/sbin/glinet-vlan-qos-setup.sh
+  log_info "Uninstalled glinet-vlan-qos scripts"
+}
+
+# ---------- Main ----------
 case "${1:-}" in
-  start|stop|restart)
-    apply_qos "$1"
+  start|restart)
+    load_config
+    detect_model
+    [ "$MODEL" = "unknown" ] && log_err "Unknown model; run setup wizard or set QOS_MODEL"
+    apply_qos start
     ;;
-  install)
-    install_persistence
-    ;;
-  uninstall)
-    remove_persistence
-    apply_qos stop
+  stop)
+    load_config
+    detect_wan
+    stop_qos
     ;;
   status)
-    apply_qos status
+    load_config
+    detect_model
+    status
     ;;
   detect)
-    echo "Detected model: ${MODEL}"
+    detect_model
+    ;;
+  install)
+    install
+    ;;
+  uninstall)
+    uninstall
     ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status|install|uninstall|detect}"
+    echo "Usage: $0 {start|stop|restart|status|detect|install|uninstall}"
     exit 1
     ;;
 esac
-
-exit $?
