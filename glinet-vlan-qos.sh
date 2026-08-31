@@ -90,7 +90,7 @@ add_cake_leaf() {
 
 add_fw_filter() {
   local dev="$1" parent="$2" pref="$3" mark="$4" flowid="$5"
-  [ "$USE_U32_FILTERS" = "1" ] || return 0
+  # tc fw filter works on both tc-tiny and tc-full (kernel-level)
   tc filter add dev "$dev" parent "$parent" protocol ip pref "$pref" handle "$mark" fw flowid "$flowid" 2>/dev/null || \
     log_err "Failed to add fw filter mark $mark on $dev"
 }
@@ -100,8 +100,24 @@ setup_nft() {
   has_nft || return 0
   nft delete table inet gl-qos 2>/dev/null || true
   nft 'add table inet gl-qos' 2>/dev/null || true
-  nft 'add chain inet gl-qos mangle_out { type filter hook output priority mangle; policy accept; }' 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_out oifname \"$WAN_IF\" meta mark set 0x10" 2>/dev/null || true
+
+  # prerouting: classify by ingress bridge interface
+  nft 'add chain inet gl-qos mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }' 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_prerouting iifname \"br-lan\" meta mark set 0x10" 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_prerouting iifname \"br-iot\" meta mark set 0x20" 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_prerouting iifname \"br-guest\" meta mark set 0x30" 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_prerouting iifname \"tailscale0\" meta mark set 0x40" 2>/dev/null || true
+
+  # forward: classify forwarded traffic by source bridge (for egress from LAN)
+  nft 'add chain inet gl-qos mangle_forward { type filter hook forward priority mangle; policy accept; }' 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_forward iifname \"br-lan\" meta mark set 0x10" 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_forward iifname \"br-iot\" meta mark set 0x20" 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_forward iifname \"br-guest\" meta mark set 0x30" 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_forward iifname \"tailscale0\" meta mark set 0x40" 2>/dev/null || true
+
+  # output: classify locally generated traffic to WAN
+  nft 'add chain inet gl-qos mangle_output { type filter hook output priority mangle; policy accept; }' 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_output oifname \"$WAN_IF\" meta mark set 0x10" 2>/dev/null || true
 }
 
 # ---------- Stop / cleanup ----------
