@@ -9,112 +9,123 @@ CONF_FILE="/etc/gl-qos-vlan.conf"
 
 log_info() { echo "INFO: $*"; }
 log_warn() { echo "WARN: $*"; }
-log_err() { echo "ERR: $*"; }
+log_err() { echo "ERR: $*" >&2; }
+
+# ---------- Model detection ----------
+detect_model() {
+  local board
+  board=$(cat /etc/board.json 2>/dev/null || echo '{}')
+  case "$board" in
+    *'"glinet,gl-be14000"'*|*'"glinet,gl-mt6000"'*|*'"glinet,gl-be10000"'*|*'"glinet,gl-mt3600be"'*) echo "flint2" ;;
+    *'"qcom,ipq5332-ap-mi01.6"'*|*'"glinet,gl-be3600"'*|*'"qcom,ipq5332-ap-mi04.1-v1"'*) echo "flint3" ;;
+    *) echo "unknown" ;;
+  esac
+}
 
 # ---------- Step 0: Mode selection ----------
 select_mode() {
   echo ""
   echo "=== Step 0: Traffic Shaping Mode ==="
-  echo "1) QoS (HTB + CAKE) - Per-VLAN/SSID priority with WAN-rooted bandwidth limits"
+  echo "1) QoS (HTB + CAKE) - WAN-rooted per-VLAN priority"
   echo "2) SQM (CAKE diffserv) - Smart Queue Management on WAN only"
   read -p "Select mode [1-2]: " -r mode
   case "$mode" in
-    2) echo "QOS_MODE=sqm" ;;
-    1|*) echo "QOS_MODE=qos" ;;
+    2) QOS_MODE="sqm" ;;
+    1|*) QOS_MODE="qos" ;;
   esac
+  echo "QOS_MODE=$QOS_MODE"
 }
 
 # ---------- Step 1: Model selection ----------
 select_model() {
   echo ""
   echo "=== Step 1: Router Model ==="
-  echo "1) GL.iNet Flint 2 (GL-MT6000) - OpenWrt 21.02, tc-tiny"
-  echo "2) GL.iNet Flint 3 (GL-BE9300) - OpenWrt 23.05, tc-full"
-  echo "3) GL.iNet Flint 4 (GL-BE14000) - OpenWrt 21.02, tc-tiny"
-  echo "4) GL.iNet Slate 7 (GL-BE3600) - OpenWrt 23.05, tc-full"
-  echo "5) GL.iNet Slate 7 Pro (GL-BE10000) - OpenWrt 21.02, tc-tiny"
-  echo "6) GL.iNet Beryl 7 (GL-MT3600BE) - OpenWrt 21.02, tc-tiny"
-  echo "7) GL.iNet Flint 3e (GL-BE6500) - OpenWrt 23.05, tc-full"
+  echo "1) GL.iNet Flint 2 (GL-MT6000)"
+  echo "2) GL.iNet Flint 3 (GL-BE9300)"
+  echo "3) GL.iNet Flint 4 (GL-BE14000)"
+  echo "4) GL.iNet Slate 7 (GL-BE3600)"
+  echo "5) GL.iNet Slate 7 Pro (GL-BE10000)"
+  echo "6) GL.iNet Beryl 7 (GL-MT3600BE)"
+  echo "7) GL.iNet Flint 3e (GL-BE6500)"
   echo "8) Auto-detect"
-  read -p "Select model [1-8]: " -r model
-  case "$model" in
-    1) echo "QOS_MODEL=flint2" ;;
-    2) echo "QOS_MODEL=flint3" ;;
-    3) echo "QOS_MODEL=flint4" ;;
-    4) echo "QOS_MODEL=slate7" ;;
-    5) echo "QOS_MODEL=slate7pro" ;;
-    6) echo "QOS_MODEL=beryl7" ;;
-    7) echo "QOS_MODEL=flint3e" ;;
-    8|*) echo "QOS_MODEL=auto" ;;
+  read -p "Select model [1-8]: " -r m
+  case "$m" in
+    1) QOS_MODEL="flint2" ;;
+    2) QOS_MODEL="flint3" ;;
+    3) QOS_MODEL="flint4" ;;
+    4) QOS_MODEL="slate7" ;;
+    5) QOS_MODEL="slate7pro" ;;
+    6) QOS_MODEL="beryl7" ;;
+    7) QOS_MODEL="flint3e" ;;
+    8|*)
+      detected=$(detect_model)
+      if [ "$detected" = "unknown" ]; then
+        echo "WARN: Could not auto-detect model. Continuing with Flint 2 defaults."
+        echo "This is not recommended. If issues occur, please select your model manually."
+        read -p "Continue anyway? [y/N]: " -r confirm
+        case "$confirm" in
+          y|Y|yes) : ;;
+          *) log_err "Aborted"; exit 1 ;;
+        esac
+      fi
+      QOS_MODEL="$detected"
+      ;;
   esac
-}
-
-# Detect actual model
-detect_model_actual() {
-  local board
-  board=$(cat /etc/board.json 2>/dev/null || echo '{}')
-  case "$board" in
-    *'"glinet,gl-be14000"'*|*'"glinet,gl-mt6000"'*) echo "flint2" ;;
-    *'"qcom,ipq5332-ap-mi01.6"'*) echo "flint3" ;;
-    *'"glinet,gl-be3600"'*) echo "flint3" ;;
-    *'"glinet,gl-be10000"'*) echo "flint2" ;;
-    *'"glinet,gl-mt3600be"'*) echo "flint2" ;;
-    *'"qcom,ipq5332-ap-mi04.1-v1"'*) echo "flint3" ;;
-    *) echo "unknown" ;;
-  esac
+  echo "QOS_MODEL=$QOS_MODEL"
 }
 
 # ---------- Step 2: Persistence ----------
 select_persistence() {
   echo ""
   echo "=== Step 2: Persistence ==="
-  echo "1) Enable (apply on boot via rc.local + sysupgrade protection)"
-  echo "2) Disable"
-  read -p "Select [1-2]: " -r persist
-  case "$persist" in
-    1) echo "PERSISTENT=1" ;;
-    2|*) echo "PERSISTENT=0" ;;
+  echo "1) Enable (survives reboot and firmware upgrade)"
+  echo "2) Disable (manual only)"
+  read -p "Select [1-2]: " -r p
+  case "$p" in
+    1) PERSISTENT=1 ;;
+    2|*) PERSISTENT=0 ;;
   esac
+  echo "PERSISTENT=$PERSISTENT"
 }
 
-# ---------- Step 3: VLAN/Bridge Priority ----------
+# ---------- Step 3: Bridge Priority ----------
 select_priority() {
   echo ""
   echo "=== Step 3: Bridge Priority ==="
-  echo "Enter priority 1 (highest) through 3 (lowest) for each bridge"
-  echo "Available: br-lan, br-iot, br-guest, tailscale0"
-  
-  local bridges=$(ls -d /sys/class/net/br-* /sys/class/net/tailscale0 2>/dev/null | xargs basename -a 2>/dev/null || echo "br-lan br-iot br-guest tailscale0")
-  echo "Detected: $bridges"
+  echo "Assign priority 1 (highest) to 3 (lowest) for traffic on each bridge:"
+  local bridges="br-lan br-iot br-guest tailscale0"
   for b in $bridges; do
-    read -p "Priority for $b (1=highest, 0=skip): " -r pri
-    [ "$pri" -lt 1 ] || [ "$pri" -gt 3 ] && { echo "Invalid priority $pri for $b"; pri=3; }
-    echo "PRIOR_$b=$pri"
+    if [ -d "/sys/class/net/$b" ]; then
+      read -p "Priority for $b (1-3, 0 to skip): " -r pri
+      case "$pri" in
+        1|2|3) PRIOR_$b=$pri ;;
+        *) PRIOR_$b="skip" ;;
+      esac
+    fi
   done
 }
 
 # ---------- Step 4: WAN Bandwidth ----------
 select_bandwidth() {
   echo ""
-  echo "=== Step 4: WAN Bandwidth Limits ==="
-  read -p "WAN upload limit (kbps, e.g., 100000 for 100 Mbps): " -r wan_up
-  read -p "WAN download limit (kbps, e.g. 500000 for 500 Mbps): " -r wan_down
-  : "${wan_up:=100000}"
-  : "${wan_down:=500000}"
-  echo "WAN_BW_UP=$wan_up"
-  echo "WAN_BW_DOWN=$wan_down"
+  echo "=== Step 4: WAN Bandwidth ==="
+  read -p "WAN upload limit (kbps, e.g. 100000 for 100Mbps): " -r up
+  read -p "WAN download limit (kbps, e.g. 500000 for 500Mbps): " -r down
+  WAN_BW_UP="${up:-100000}"
+  WAN_BW_DOWN="${down:-500000}"
+  echo "WAN_BW_UP=$WAN_BW_UP"
+  echo "WAN_BW_DOWN=$WAN_BW_DOWN"
 }
 
 # ---------- Write config ----------
 write_config() {
-  local mode="$1" model="$2" persist="$3" wan_up="$4" wan_down="$5"
   cat > "$CONF_FILE" <<EOF
 # Generated by glinet-vlan-qos-setup.sh
-QOS_MODE=$mode
-QOS_MODEL=$model
-PERSISTENT=$persist
-WAN_BW_UP=$wan_up
-WAN_BW_DOWN=$wan_down
+QOS_MODE=$QOS_MODE
+QOS_MODEL=$QOS_MODEL
+PERSISTENT=$PERSISTENT
+WAN_BW_UP=$WAN_BW_UP
+WAN_BW_DOWN=$WAN_BW_DOWN
 QOS_LAN_BW_UP=200000
 QOS_LAN_BW_DOWN=500000
 QOS_IOT_BW_UP=100000
@@ -130,11 +141,10 @@ EOF
 
 # ---------- Setup persistence ----------
 setup_persistence() {
-  local persist="$1"
-  [ "$persist" != "1" ] && return 0
+  [ "$PERSISTENT" != "1" ] && return 0
   log_info "Setting up persistence..."
-  
-  # Add to rc.local
+
+  # rc.local
   if [ -f /etc/rc.local ]; then
     grep -q "glinet-vlan-qos.sh start" /etc/rc.local 2>/dev/null || {
       sed -i '/^exit 0$/d' /etc/rc.local 2>/dev/null || true
@@ -142,40 +152,53 @@ setup_persistence() {
       log_info "Added to rc.local"
     }
   fi
-  
-  # Add to sysupgrade protection
+
+  # sysupgrade protection
   mkdir -p /etc/sysupgrade.conf.d
   printf '/usr/local/sbin/glinet-vlan-qos.sh\n/etc/gl-qos-vlan.conf\n' > /etc/sysupgrade.conf.d/glinet-qos.conf
   log_info "Added to sysupgrade protection"
+
+  # gl-switch.d hook
+  mkdir -p /etc/gl-switch.d
+  cat > /etc/gl-switch.d/vlan-qos.sh <<'HOOK'
+#!/bin/sh
+case "$1" in
+  on|off|start) /usr/local/sbin/glinet-vlan-qos.sh start >/dev/null 2>&1 || true ;;
+esac
+HOOK
+  chmod +x /etc/gl-switch.d/vlan-qos.sh
+  log_info "Added to gl-switch.d"
 }
 
 # ---------- Main ----------
+QOS_MODE="qos"
+QOS_MODEL=""
+PERSISTENT=0
+WAN_BW_UP=0
+WAN_BW_DOWN=0
+
 main() {
   echo "GL.iNet Bandwidth QoS Setup Wizard"
   echo "===================================="
-  
-  local mode model persist wan_up wan_down priorities
-  
-  mode=$(select_mode)
-  model=$(select_model)
-  persist=$(select_persistence)
-  bandwidth_vals=$(select_bandwidth)
-  wan_up=$(echo "$bandwidth_vals" | grep "WAN_BW_UP=" | cut -d= -f2)
-  wan_down=$(echo "$bandwidth_vals" | grep "WAN_BW_DOWN=" | cut -d= -f2)
-  priorities=$(select_priority)
-  
+
+  select_mode
+  select_model
+  select_persistence
+  select_priority
+  select_bandwidth
+
   echo ""
   echo "=== Summary ==="
-  echo "Mode: $mode"
-  echo "Model: $model"
-  echo "Persistent: $persist"
-  echo "WAN: ${wan_up} up / ${wan_down} down kbps"
-  
+  echo "Mode: $QOS_MODE"
+  echo "Model: $QOS_MODEL"
+  echo "Persistent: $PERSISTENT"
+  echo "WAN: ${WAN_BW_UP} up / ${WAN_BW_DOWN} down kbps"
+
   read -p "Write config and apply? [y/N]: " -r confirm
   case "$confirm" in
     y|Y|yes)
-      write_config "$mode" "$model" "$persist" "$wan_up" "$wan_down" > /dev/null
-      setup_persistence "$persist"
+      write_config
+      setup_persistence
       echo "Run '$MAIN_SCRIPT start' to apply"
       ;;
     *)

@@ -25,7 +25,8 @@ has_nft() { command -v nft >/dev/null 2>&1; }
 
 # ---------- Model detection ----------
 detect_model() {
-  local board="$(cat /etc/board.json 2>/dev/null || echo '{}')"
+  local board
+  board=$(cat /etc/board.json 2>/dev/null || echo '{}')
   case "$board" in
     *'"glinet,gl-be14000"'*|*'"glinet,gl-mt6000"'*) MODEL="flint2"; USE_U32_FILTERS=0 ;;
     *'"qcom,ipq5332-ap-mi01.6"'*) MODEL="flint3"; USE_U32_FILTERS=1 ;;
@@ -59,7 +60,7 @@ load_config() {
 # ---------- WAN detection ----------
 detect_wan() {
   local def
-  def="$(ip route show default 2>/dev/null | head -n1 | awk '{print $5}')"
+  def=$(ip route show default 2>/dev/null | head -n1 | awk '{print $5}')
   [ -n "$def" ] && WAN_IF="$def"
   [ -d "/sys/class/net/$WAN_IF" ] || WAN_IF="eth0"
   echo "WAN interface: $WAN_IF"
@@ -98,9 +99,21 @@ add_fw_filter() {
 setup_nft() {
   has_nft || return 0
   nft delete table inet gl-qos 2>/dev/null || true
-  nft add table inet gl-qos 2>/dev/null || true
-  nft add chain inet gl-qos mangle_out { type filter hook output priority mangle \; policy accept \; } 2>/dev/null || true
-  nft add rule inet gl-qos mangle_out oifname "$WAN_IF" meta mark set 0x10 2>/dev/null || true
+  nft 'add table inet gl-qos' 2>/dev/null || true
+  nft 'add chain inet gl-qos mangle_out { type filter hook output priority mangle; policy accept; }' 2>/dev/null || true
+  nft "add rule inet gl-qos mangle_out oifname \"$WAN_IF\" meta mark set 0x10" 2>/dev/null || true
+}
+
+# ---------- Stop / cleanup ----------
+stop_qos() {
+  detect_wan
+  tc qdisc del dev "$WAN_IF" root 2>/dev/null || true
+  [ -d /sys/class/net/br-lan ] && tc qdisc del dev br-lan root 2>/dev/null || true
+  [ -d /sys/class/net/br-iot ] && tc qdisc del dev br-iot root 2>/dev/null || true
+  [ -d /sys/class/net/br-guest ] && tc qdisc del dev br-guest root 2>/dev/null || true
+  [ -d /sys/class/net/tailscale0 ] && tc qdisc del dev tailscale0 root 2>/dev/null || true
+  has_nft && nft delete table inet gl-qos 2>/dev/null || true
+  log_info "Stopped QoS on $WAN_IF"
 }
 
 # ---------- WAN-rooted QoS ----------
@@ -110,7 +123,7 @@ apply_wan_rooted_qos() {
 
   case "$action" in
     start|restart)
-      stop >/dev/null 2>&1 || true
+      stop_qos || true
       log_info "Applying WAN-rooted QoS on $WAN_IF up=${WAN_BW_UP} down=${WAN_BW_DOWN} mode=$QOS_MODE model=$MODEL"
       detect_wan
       setup_nft
@@ -149,10 +162,7 @@ apply_wan_rooted_qos() {
       fi
       ;;
     stop)
-      tc qdisc del dev "$WAN_IF" root 2>/dev/null || true
-      [ -d /sys/class/net/br-lan ] && tc qdisc del dev br-lan root 2>/dev/null || true
-      has_nft && nft delete table inet gl-qos 2>/dev/null || true
-      log_info "Stopped WAN-rooted QoS on $WAN_IF"
+      stop_qos
       ;;
   esac
 }
@@ -162,7 +172,7 @@ apply_sqm() {
   local action="$1"
   case "$action" in
     start|restart)
-      stop >/dev/null 2>&1 || true
+      stop_qos || true
       [ "$WAN_BW_UP" -gt 0 ] || { log_err "WAN_BW_UP not set for SQM"; return 1; }
       log_info "Applying SQM CAKE diffserv on $WAN_IF at $WAN_BW_UP/$WAN_BW_DOWN kbit"
       detect_wan
@@ -172,6 +182,7 @@ apply_sqm() {
         log_err "Failed to apply SQM CAKE on $WAN_IF"
       ;;
     stop)
+      detect_wan
       tc qdisc del dev "$WAN_IF" root 2>/dev/null || true
       log_info "Stopped SQM on $WAN_IF"
       ;;
@@ -208,7 +219,7 @@ install() {
 }
 
 uninstall() {
-  stop >/dev/null 2>&1 || true
+  stop_qos || true
   rm -f /usr/local/sbin/glinet-vlan-qos.sh /usr/local/sbin/glinet-vlan-qos-setup.sh
   log_info "Uninstalled glinet-vlan-qos scripts"
 }
@@ -223,7 +234,8 @@ case "${1:-}" in
     ;;
   stop)
     load_config
-    apply_qos stop
+    detect_wan
+    stop_qos
     ;;
   status)
     load_config
