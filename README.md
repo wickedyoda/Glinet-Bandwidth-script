@@ -20,7 +20,7 @@ Supports both **QoS** (WAN-rooted per-VLAN/SSID priority) and **SQM** (Smart Que
 ## Quick Start
 
 ```sh
-# One-liner install
+# One-liner install (with checksum verification)
 curl -fsSL https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/master/install.sh | sh
 
 # Run interactive setup
@@ -38,16 +38,17 @@ The setup wizard will:
 
 ## How It Works
 
-**NEW WAN-Rooted Architecture:**
+**WAN-Rooted Architecture:**
 1. **Auto-detects** Flint 2 / Flint 3 / Flint 4 / Slate 7 / Slate 7 Pro / Beryl 7 / Flint 3e at runtime
 2. **HTB root qdisc** on WAN interface (`eth0`) with total bandwidth cap
 3. **Priority classes** with CAKE leaf qdiscs:
    - Class 10 (`prio 1`): LAN + Tailscale — **highest** WAN priority
    - Class 20 (`prio 2`): IoT — medium priority  
    - Class 30 (`prio 3`): Guest — lowest priority
-4. **nft fwmark classification** steers traffic to WAN classes
-5. **Optional bridge-level shaping** for wired LAN clients
-6. **Persistence** via `/etc/gl-switch.d/` + `/etc/rc.local` + `/etc/sysupgrade.conf.d/`
+4. **nft marks** steer traffic to WAN classes via prerouting/forward/output chains
+5. **fw filter** on WAN egress routes marked packets to priority classes
+6. **Optional bridge-level shaping** for wired LAN clients
+7. **Persistence** via `/etc/gl-switch.d/` + `/etc/rc.local` + `/etc/sysupgrade.conf.d/`
 
 ---
 
@@ -57,7 +58,8 @@ The setup wizard will:
 |------|---------|
 | `glinet-vlan-qos.sh` | Main QoS engine |
 | `glinet-vlan-qos-setup.sh` | Interactive setup wizard |
-| `install.sh` | One-liner installer |
+| `install.sh` | One-liner installer with checksum verification |
+| `checksums.txt` | SHA256 checksums for verification |
 | `README.md` | This documentation |
 
 ---
@@ -69,7 +71,7 @@ The setup wizard will:
 glinet-vlan-qos-setup.sh
 
 # Manual control
-glinet-vlan-qos.sh start|stop|restart|status|detect
+glinet-vlan-qos.sh start|stop|restart|status|detect|install|uninstall
 
 # Uninstall
 glinet-vlan-qos-setup.sh uninstall
@@ -85,6 +87,7 @@ WAN-rooted HTB + CAKE with per-VLAN priority
 - Shaped at WAN egress for proper upload arbitration
 - HTB classes prioritize LAN > IoT > Guest
 - Optional bridge-level shaping for wired traffic
+- Works on both `tc-tiny` and `tc-full` models
 
 ### SQM Mode
 Smart Queue Management with CAKE diffserv
@@ -110,7 +113,7 @@ Smart Queue Management with CAKE diffserv
 Edit `/etc/gl-qos-vlan.conf` on the router:
 
 ```bash
-# WAN bandwidth limits (kbit/s)
+# WAN bandwidth limits (kilobits per second)
 WAN_BW_UP=100000          # 100 Mbps upload
 WAN_BW_DOWN=500000        # 500 Mbps download
 
@@ -147,6 +150,26 @@ PERSISTENT=1
 
 ---
 
+## Uninstall
+
+```sh
+# Via setup wizard
+glinet-vlan-qos-setup.sh uninstall
+
+# Or directly
+glinet-vlan-qos.sh uninstall
+```
+
+This removes:
+- HTB qdiscs and CAKE leaf qdiscs on WAN and bridges
+- All fw filters and nft marks
+- `/etc/gl-switch.d/vlan-qos.sh` hook
+- `/etc/rc.local` QoS stanza
+- `/etc/sysupgrade.conf.d/glinet-qos.conf`
+- The scripts themselves from `/usr/local/sbin/`
+
+---
+
 ## Verification
 
 ```sh
@@ -165,70 +188,12 @@ nft list table inet gl-qos
 
 ---
 
-## Persistence Options
-
-### Enable Persistence (`PERSISTENT=1`)
-- Installs hook in `/etc/gl-switch.d/vlan-qos.sh` — runs after network changes
-- Appends start command to `/etc/rc.local` — runs on boot
-- Adds to `/etc/sysupgrade.conf.d/` for firmware upgrade survival
-- Survives: firmware upgrades, network restarts
-- **Does NOT survive**: factory reset
-
-### Disable Persistence (`PERSISTENT=0`)
-- No auto-start hooks installed
-- Use for testing or temporary QoS
-
----
-
-## Uninstall
-
-```sh
-glinet-vlan-qos.sh uninstall
-```
-
-This removes:
-- `/etc/gl-switch.d/vlan-qos.sh`
-- `/usr/local/sbin/glinet-vlan-qos.sh`
-- All HTB qdiscs and nft marks
-
----
-
 ## Requirements
 
 - GL.iNet Flint 2, Flint 3, Flint 4, Slate 7, Slate 7 Pro, Beryl 7, or Flint 3e
 - OpenWrt 21.02+
 - Packages: `tc-full` or `tc-tiny`, `kmod-sched-cake`, `sqm-scripts`
 - Root SSH access
-
----
-
-## Troubleshooting
-
-**Model detection fails:**
-```sh
-# Check board.json
-cat /etc/board.json | grep model
-
-# Manually set model
-export QOS_MODEL=flint2
-glinet-vlan-qos.sh start
-```
-
-**WAN egress not shaped:**
-```sh
-# Verify qdisc on WAN interface
-tc qdisc show dev eth0
-
-# Check class allocations
-tc class show dev eth0
-```
-
-**Persistence not surviving upgrades:**
-```sh
-# Verify sysupgrade protection
-cat /etc/sysupgrade.conf.d/glinet-qos.conf
-ls -la /lib/upgrade/retain.d/
-```
 
 ---
 
