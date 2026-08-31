@@ -67,6 +67,7 @@ select_model() {
           y|Y|yes) : ;;
           *) log_err "Aborted"; exit 1 ;;
         esac
+        detected="flint2"
       fi
       QOS_MODEL="$detected"
       ;;
@@ -98,8 +99,22 @@ select_priority() {
     if [ -d "/sys/class/net/$b" ]; then
       read -p "Priority for $b (1-3, 0 to skip): " -r pri
       case "$pri" in
-        1|2|3) PRIOR_$b=$pri ;;
-        *) PRIOR_$b="skip" ;;
+        1|2|3)
+          case "$b" in
+            br-lan) PRIOR_LAN=$pri ;;
+            br-iot) PRIOR_IOT=$pri ;;
+            br-guest) PRIOR_GUEST=$pri ;;
+            tailscale0) PRIOR_TAILSCALE=$pri ;;
+          esac
+          ;;
+        *)
+          case "$b" in
+            br-lan) PRIOR_LAN=skip ;;
+            br-iot) PRIOR_IOT=skip ;;
+            br-guest) PRIOR_GUEST=skip ;;
+            tailscale0) PRIOR_TAILSCALE=skip ;;
+          esac
+          ;;
       esac
     fi
   done
@@ -178,6 +193,14 @@ WAN_BW_UP=0
 WAN_BW_DOWN=0
 
 main() {
+  if [ "${1:-}" = "uninstall" ]; then
+    if [ -x "$MAIN_SCRIPT" ]; then
+      exec "$MAIN_SCRIPT" uninstall
+    fi
+    log_err "$MAIN_SCRIPT is not installed"
+    exit 1
+  fi
+
   echo "GL.iNet Bandwidth QoS Setup Wizard"
   echo "===================================="
 
