@@ -44,6 +44,27 @@ Assign priority (1-3, 1=highest) to each bridge:
 ### Step 5: Summary & Apply
 Review settings and apply. The script verifies qdisc and nft rules.
 
+## Uninstall
+
+To remove QoS and all traces:
+
+```sh
+glinet-vlan-qos-setup.sh uninstall
+```
+
+Or directly:
+```sh
+/usr/local/sbin/glinet-vlan-qos.sh uninstall
+```
+
+This removes:
+- HTB qdiscs and CAKE leaf qdiscs on WAN and bridges
+- All fw filters and nft marks
+- `/etc/gl-switch.d/vlan-qos.sh` hook
+- `/etc/rc.local` QoS stanza
+- `/etc/sysupgrade.conf.d/glinet-qos.conf`
+- The scripts themselves from `/usr/local/sbin/`
+
 ## Skipping the Wizard
 
 ```sh
