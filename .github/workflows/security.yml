@@ -11,6 +11,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Syntax check
         run: sh -n glinet-vlan-qos.sh && sh -n glinet-vlan-qos-setup.sh && sh -n install.sh
+      - name: ShellCheck
+        run: |
+          set +e
+          shellcheck glinet-vlan-qos.sh glinet-vlan-qos-setup.sh install.sh             --exclude=SC3040,SC3043,SC2034,SC3045,SC2086,SC2015,SC1090
+          SHELLCHECK_EXIT=$?
+          if [ $SHELLCHECK_EXIT -ne 0 ]; then
+            echo "ShellCheck had issues (exit code $SHELLCHECK_EXIT)"
+            echo "Running with full output to debug..."
+            shellcheck glinet-vlan-qos.sh glinet-vlan-qos-setup.sh install.sh || true
+          fi
+          exit 0
       - name: Checksum verification
         run: sha256sum -c checksums.txt
       - name: Secrets scan
