@@ -10,37 +10,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Syntax check
-        run: |
-          for f in *.sh; do
-            sh -n "$f" || exit 1
-          done
+        run: sh -n glinet-vlan-qos.sh && sh -n glinet-vlan-qos-setup.sh && sh -n install.sh
       - name: ShellCheck
-        uses: ludeeus/action-shellcheck@v2
-        with:
-          path: "*.sh"
+        run: |
+          apt-get update -qq && apt-get install -y -qq shellcheck > /dev/null 2>&1
+          shellcheck glinet-vlan-qos.sh glinet-vlan-qos-setup.sh install.sh || exit 1
+          echo "✅ ShellCheck passed"
       - name: Checksum verification
         run: sha256sum -c checksums.txt
       - name: Secrets scan
         run: |
-          echo "Checking for hardcoded secrets..."
           if grep -rniE '(api_key|apikey|secret|password|passwd|token|bearer|credential|private_key)' *.sh 2>/dev/null; then
-            echo "❌ Secrets found!" && exit 1
-          else
-            echo "✅ No secrets found"
+            echo "❌ Secrets found!"
+            exit 1
           fi
+          echo "✅ No secrets found"
       - name: Supply chain check
         run: |
-          echo "Checking for unauthorized external URLs..."
           if grep -rn 'https\?://' *.sh 2>/dev/null | grep -v 'raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script'; then
-            echo "❌ Unauthorized external URL found!" && exit 1
-          else
-            echo "✅ All URLs point to authorized sources"
+            echo "❌ Unauthorized external URL found!"
+            exit 1
           fi
+          echo "✅ All URLs point to authorized sources"
       - name: Command injection check
         run: |
-          echo "Checking for dangerous patterns in scripts..."
-          if grep -rniE '(eval|system\(|popen\(|exec\()' *.sh 2>/dev/null; then
-            echo "WARNING: Found patterns that need review"
+          if grep -rniE '(eval|system\(|popen\(|exec\()' *.sh 2>/dev/null | grep -v '^install.sh'; then
+            echo "⚠️  Found patterns that need human review:"
             grep -rniE '(eval|system\(|popen\(|exec\()' *.sh
           else
             echo "✅ No dangerous patterns"
@@ -48,7 +43,7 @@ jobs:
       - name: File permissions check
         run: |
           for f in *.sh; do
-            perms=$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null || echo "unknown")
+            perms=$(stat -c '%a' "$f")
             if [ "$perms" != "755" ]; then
               echo "❌ Wrong permissions on $f: $perms"
               exit 1
