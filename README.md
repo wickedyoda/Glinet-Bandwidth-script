@@ -1,5 +1,7 @@
 # GL.iNet Bandwidth Script
 
+![GL.iNet Logo](assets/glinet-logo.png)
+
 Per-VLAN/SSR and WAN-rooted bandwidth priority for **GL.iNet Flint 2**, **GL.iNet Flint 3**, **GL.iNet Flint 4 / GL-BE14000**, **GL.iNet Slate 7**, **GL.iNet Slate 7 Pro**, **GL.iNet Beryl 7**, and **GL.iNet Flint 3e / GL-BE6500** using **HTB + CAKE** on OpenWrt.
 
 Supports both **QoS** (WAN-rooted per-VLAN/SSID priority) and **SQM** (Smart Queue Management with CAKE) modes.
