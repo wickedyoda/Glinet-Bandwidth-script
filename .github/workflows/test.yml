@@ -1,0 +1,25 @@
+name: CI Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: List files
+        run: ls -la
+      - name: Show contents
+        run: |
+          echo "=== glinet-vlan-qos.sh ==="
+          head -5 glinet-vlan-qos.sh
+          echo ""
+          echo "=== glinet-vlan-qos-setup.sh ==="
+          head -5 glinet-vlan-qos-setup.sh
+          echo ""
+          echo "=== install.sh ==="
+          cat install.sh
