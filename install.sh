@@ -3,7 +3,7 @@ set -e
 INSTALL_DIR=/usr/local/sbin
 SCRIPT=glinet-vlan-qos.sh
 SETUP_SCRIPT=glinet-vlan-qos-setup.sh
-CHECKSUMS=checksums-router.txt
+CHECKSUMS=checksums.txt
 REMOTE=https://raw.githubusercontent.com/wickedyoda/Glinet-Bandwidth-script/master
 mkdir -p "${INSTALL_DIR}"
 # Download checksums
