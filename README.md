@@ -42,15 +42,17 @@ The setup wizard will:
 
 **WAN-Rooted Architecture:**
 1. **Auto-detects** Flint 2 / Flint 3 / Flint 4 / Slate 7 / Slate 7 Pro / Beryl 7 / Flint 3e at runtime
-2. **HTB root qdisc** on WAN interface (`eth0`) with total bandwidth cap
-3. **Priority classes** with CAKE leaf qdiscs:
+2. **Auto-discovers all VLAN bridges** (`br-*` interfaces) — not just the default 3 (LAN/IoT/Guest). Any bridge like `br-vlan2`, `br-vlan3`, etc. will be automatically detected, classified, and shaped.
+3. **HTB root qdisc** on WAN interface (`eth0`) with total bandwidth cap
+4. **Priority classes** with CAKE leaf qdiscs:
    - Class 10 (`prio 1`): LAN + Tailscale — **highest** WAN priority
    - Class 20 (`prio 2`): IoT — medium priority  
    - Class 30 (`prio 3`): Guest — lowest priority
-4. **nft marks** steer traffic to WAN classes via prerouting/forward/output chains
-5. **fw filter** on WAN egress routes marked packets to priority classes
-6. **Optional bridge-level shaping** for wired LAN clients
-7. **Persistence** via `/etc/gl-switch.d/` + `/etc/rc.local` + `/etc/sysupgrade.conf.d/`
+   - Additional bridges (br-vlan2, br-vlan3, etc.) get assigned class numbers dynamically
+5. **nft marks** steer traffic to WAN classes via prerouting/forward/output chains
+6. **fw filter** on WAN egress routes marked packets to priority classes
+7. **Optional bridge-level shaping** for wired LAN clients
+8. **Persistence** via `/etc/gl-switch.d/` + `/etc/rc.local` + `/etc/sysupgrade.conf.d/`
 
 ---
 
@@ -73,7 +75,10 @@ The setup wizard will:
 glinet-vlan-qos-setup.sh
 
 # Manual control
-glinet-vlan-qos.sh start|stop|restart|status|detect|install|uninstall
+glinet-vlan-qos.sh start|stop|restart|status|detect|detect-vlans|install|uninstall
+
+# View auto-discovered VLAN bridges
+glinet-vlan-qos.sh detect-vlans
 
 # Uninstall
 glinet-vlan-qos-setup.sh uninstall
@@ -107,6 +112,7 @@ Smart Queue Management with CAKE diffserv
 | **Top** | `br-lan` + `tailscale0` | LAN + Tailscale mesh |
 | **Medium** | `br-iot` | IoT devices |
 | **Low** | `br-guest` | Guest network |
+| **Dynamic** | *Any additional `br-*` bridge* | Auto-detected VLAN bridges (e.g. `br-vlan2`, `br-vlan3`) |
 
 ---
 
