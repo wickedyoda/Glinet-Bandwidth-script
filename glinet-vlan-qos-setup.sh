@@ -184,18 +184,18 @@ select_bandwidth() {
 get_config_value() {
   local varname="$1"
   case "$varname" in
-    QOS_LAN_BW_UP)     [ -n "$QOS_LAN_BW_UP" ] && echo "$QOS_LAN_BW_UP" ;;
-    QOS_LAN_BW_DOWN)   [ -n "$QOS_LAN_BW_DOWN" ] && echo "$QOS_LAN_BW_DOWN" ;;
-    QOS_IOT_BW_UP)     [ -n "$QOS_IOT_BW_UP" ] && echo "$QOS_IOT_BW_UP" ;;
-    QOS_IOT_BW_DOWN)   [ -n "$QOS_IOT_BW_DOWN" ] && echo "$QOS_IOT_BW_DOWN" ;;
-    QOS_GUEST_BW_UP)   [ -n "$QOS_GUEST_BW_UP" ] && echo "$QOS_GUEST_BW_UP" ;;
-    QOS_GUEST_BW_DOWN) [ -n "$QOS_GUEST_BW_DOWN" ] && echo "$QOS_GUEST_BW_DOWN" ;;
-    QOS_TAILSCALE_BW_UP)     [ -n "$QOS_TAILSCALE_BW_UP" ] && echo "$QOS_TAILSCALE_BW_UP" ;;
-    QOS_TAILSCALE_BW_DOWN)   [ -n "$QOS_TAILSCALE_BW_DOWN" ] && echo "$QOS_TAILSCALE_BW_DOWN" ;;
-    PRIOR_LAN)     [ -n "$PRIOR_LAN" ] && echo "$PRIOR_LAN" ;;
-    PRIOR_IOT)     [ -n "$PRIOR_IOT" ] && echo "$PRIOR_IOT" ;;
-    PRIOR_GUEST)   [ -n "$PRIOR_GUEST" ] && echo "$PRIOR_GUEST" ;;
-    PRIOR_TAILSCALE) [ -n "$PRIOR_TAILSCALE" ] && echo "$PRIOR_TAILSCALE" ;;
+    QOS_LAN_BW_UP)     [ -n "${QOS_LAN_BW_UP:-}" ] && echo "${QOS_LAN_BW_UP}" ;;
+    QOS_LAN_BW_DOWN)   [ -n "${QOS_LAN_BW_DOWN:-}" ] && echo "${QOS_LAN_BW_DOWN}" ;;
+    QOS_IOT_BW_UP)     [ -n "${QOS_IOT_BW_UP:-}" ] && echo "${QOS_IOT_BW_UP}" ;;
+    QOS_IOT_BW_DOWN)   [ -n "${QOS_IOT_BW_DOWN:-}" ] && echo "${QOS_IOT_BW_DOWN}" ;;
+    QOS_GUEST_BW_UP)   [ -n "${QOS_GUEST_BW_UP:-}" ] && echo "${QOS_GUEST_BW_UP}" ;;
+    QOS_GUEST_BW_DOWN) [ -n "${QOS_GUEST_BW_DOWN:-}" ] && echo "${QOS_GUEST_BW_DOWN}" ;;
+    QOS_TAILSCALE_BW_UP)     [ -n "${QOS_TAILSCALE_BW_UP:-}" ] && echo "${QOS_TAILSCALE_BW_UP}" ;;
+    QOS_TAILSCALE_BW_DOWN)   [ -n "${QOS_TAILSCALE_BW_DOWN:-}" ] && echo "${QOS_TAILSCALE_BW_DOWN}" ;;
+    PRIOR_LAN)     [ -n "${PRIOR_LAN:-}" ] && echo "${PRIOR_LAN}" ;;
+    PRIOR_IOT)     [ -n "${PRIOR_IOT:-}" ] && echo "${PRIOR_IOT}" ;;
+    PRIOR_GUEST)   [ -n "${PRIOR_GUEST:-}" ] && echo "${PRIOR_GUEST}" ;;
+    PRIOR_TAILSCALE) [ -n "${PRIOR_TAILSCALE:-}" ] && echo "${PRIOR_TAILSCALE}" ;;
     *) ;;
   esac
 }
@@ -214,6 +214,10 @@ write_config() {
     for br in /sys/class/net/br-*; do
       [ -d "$br" ] || continue
       br=$(basename "$br")
+      # Skip IFB devices (e.g., br-lan-ifb) — they're for traffic mirroring, not QoS
+      case "$br" in
+        *-ifb) continue ;;
+      esac
       local config_name up_bw down_bw prio
       case "$br" in
         br-lan|lan) config_name="LAN" ;;
