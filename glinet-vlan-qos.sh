@@ -114,6 +114,10 @@ discover_bridges() {
   for br in /sys/class/net/br-*; do
     [ -d "$br" ] || continue
     br=$(basename "$br")
+    # Skip IFB devices (e.g., br-lan-ifb) — they're for traffic mirroring, not QoS
+    case "$br" in
+      *-ifb) continue ;;
+    esac
     idx=$((idx + 1))
     local mark=$((16 + (idx - 1) * 16))  # 0x10, 0x20, 0x30, ...
     echo "${br} ${mark}"
@@ -186,8 +190,8 @@ get_bw_config() {
     br-iot|iot) config_name="IOT" ;;
     br-guest|guest) config_name="GUEST" ;;
     tailscale0|tailscale) config_name="TAILSCALE" ;;
-    br-*) config_name=$(echo "$br" | sed 's/br-//' | tr '[:lower:]' '[:upper:]') ;;
-    *) config_name=$(echo "$br" | tr '[:lower:]' '[:upper:]') ;;
+    br-*) config_name=$(echo "$br" | sed 's/br-//' | tr '[:lower:]' '[:upper:]' | tr '-' '_') ;;
+    *) config_name=$(echo "$br" | tr '[:lower:]' '[:upper:]' | tr '-' '_') ;;
   esac
 
   eval "up_bw=\${QOS_${config_name}_BW_UP:-}"
