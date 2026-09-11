@@ -175,6 +175,29 @@ select_bandwidth() {
   echo "WAN_BW_DOWN=$WAN_BW_DOWN"
 }
 
+# ---------- Get config value helper ----------
+# In POSIX sh, indirect variable expansion isn't available. Instead we
+# check if the variable was set during the interactive wizard run by
+# reading it from the environment via a case dispatch.
+get_config_value() {
+  local varname="$1"
+  case "$varname" in
+    QOS_LAN_BW_UP)     [ -n "$QOS_LAN_BW_UP" ] && echo "$QOS_LAN_BW_UP" ;;
+    QOS_LAN_BW_DOWN)   [ -n "$QOS_LAN_BW_DOWN" ] && echo "$QOS_LAN_BW_DOWN" ;;
+    QOS_IOT_BW_UP)     [ -n "$QOS_IOT_BW_UP" ] && echo "$QOS_IOT_BW_UP" ;;
+    QOS_IOT_BW_DOWN)   [ -n "$QOS_IOT_BW_DOWN" ] && echo "$QOS_IOT_BW_DOWN" ;;
+    QOS_GUEST_BW_UP)   [ -n "$QOS_GUEST_BW_UP" ] && echo "$QOS_GUEST_BW_UP" ;;
+    QOS_GUEST_BW_DOWN) [ -n "$QOS_GUEST_BW_DOWN" ] && echo "$QOS_GUEST_BW_DOWN" ;;
+    QOS_TAILSCALE_BW_UP)     [ -n "$QOS_TAILSCALE_BW_UP" ] && echo "$QOS_TAILSCALE_BW_UP" ;;
+    QOS_TAILSCALE_BW_DOWN)   [ -n "$QOS_TAILSCALE_BW_DOWN" ] && echo "$QOS_TAILSCALE_BW_DOWN" ;;
+    PRIOR_LAN)     [ -n "$PRIOR_LAN" ] && echo "$PRIOR_LAN" ;;
+    PRIOR_IOT)     [ -n "$PRIOR_IOT" ] && echo "$PRIOR_IOT" ;;
+    PRIOR_GUEST)   [ -n "$PRIOR_GUEST" ] && echo "$PRIOR_GUEST" ;;
+    PRIOR_TAILSCALE) [ -n "$PRIOR_TAILSCALE" ] && echo "$PRIOR_TAILSCALE" ;;
+    *) ;;
+  esac
+}
+
 # ---------- Write config ----------
 write_config() {
   {
@@ -200,9 +223,9 @@ write_config() {
       esac
 
       # Use stored bandwidth if available, otherwise default
-      eval "up_bw=\${QOS_${config_name}_BW_UP:-}"
-      eval "down_bw=\${QOS_${config_name}_BW_DOWN:-}"
-      eval "prio=\${PRIOR_${config_name}:-}"
+      up_bw=$(get_config_value "QOS_${config_name}_BW_UP")
+      down_bw=$(get_config_value "QOS_${config_name}_BW_DOWN")
+      prio=$(get_config_value "PRIOR_${config_name}")
 
       # If not set, use defaults based on bridge type
       [ -z "$up_bw" ] && {
@@ -232,9 +255,9 @@ write_config() {
     # Add tailscale0 config if present
     if [ -d /sys/class/net/tailscale0 ]; then
       config_name="TAILSCALE"
-      eval "up_bw=\${QOS_TAILSCALE_BW_UP:-}"
-      eval "down_bw=\${QOS_TAILSCALE_BW_DOWN:-}"
-      eval "prio=\${PRIOR_TAILSCALE:-}"
+      up_bw=$(get_config_value "QOS_TAILSCALE_BW_UP")
+      down_bw=$(get_config_value "QOS_TAILSCALE_BW_DOWN")
+      prio=$(get_config_value "PRIOR_TAILSCALE")
       [ -z "$up_bw" ] && up_bw=200
       [ -z "$down_bw" ] && down_bw=500
       [ -z "$prio" ] && prio=1
