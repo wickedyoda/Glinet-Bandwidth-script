@@ -104,6 +104,28 @@ add_fw_filter() {
     log_err "Failed to add fw filter mark $mark on $dev"
 }
 
+# ---------- Dynamic bridge discovery ----------
+# Discover all bridge interfaces and map them to VLAN classes.
+# Each bridge gets a unique fwmark (0x10, 0x20, 0x30, ...).
+# VLAN priority is configurable via config file (QOS_PRIO_<NAME>), defaulting by order.
+discover_bridges() {
+  local idx=0
+  local br
+  for br in /sys/class/net/br-*; do
+    [ -d "$br" ] || continue
+    br=$(basename "$br")
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))  # 0x10, 0x20, 0x30, ...
+    echo "${br} ${mark}"
+  done
+  # Add tailscale0 if present
+  if [ -d /sys/class/net/tailscale0 ]; then
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))
+    echo "tailscale0 ${mark}"
+  fi
+}
+
 # ---------- nft classification ----------
 setup_nft() {
   has_nft || return 0
@@ -112,17 +134,26 @@ setup_nft() {
 
   # prerouting: classify by ingress bridge interface
   nft 'add chain inet gl-qos mangle_prerouting { type filter hook prerouting priority mangle; policy accept; }' 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_prerouting iifname \"br-lan\" meta mark set 0x10" 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_prerouting iifname \"br-iot\" meta mark set 0x20" 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_prerouting iifname \"br-guest\" meta mark set 0x30" 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_prerouting iifname \"tailscale0\" meta mark set 0x40" 2>/dev/null || true
-
-  # forward: classify forwarded traffic by source bridge (for egress from LAN)
   nft 'add chain inet gl-qos mangle_forward { type filter hook forward priority mangle; policy accept; }' 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_forward iifname \"br-lan\" meta mark set 0x10" 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_forward iifname \"br-iot\" meta mark set 0x20" 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_forward iifname \"br-guest\" meta mark set 0x30" 2>/dev/null || true
-  nft "add rule inet gl-qos mangle_forward iifname \"tailscale0\" meta mark set 0x40" 2>/dev/null || true
+
+  # Dynamically add rules for all discovered bridges
+  local idx=0
+  for br in /sys/class/net/br-*; do
+    [ -d "$br" ] || continue
+    br=$(basename "$br")
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))
+    nft "add rule inet gl-qos mangle_prerouting iifname \"$br\" meta mark set $mark" 2>/dev/null || true
+    nft "add rule inet gl-qos mangle_forward iifname \"$br\" meta mark set $mark" 2>/dev/null || true
+  done
+
+  # Add tailscale0 if present
+  if [ -d /sys/class/net/tailscale0 ]; then
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))
+    nft "add rule inet gl-qos mangle_prerouting iifname \"tailscale0\" meta mark set $mark" 2>/dev/null || true
+    nft "add rule inet gl-qos mangle_forward iifname \"tailscale0\" meta mark set $mark" 2>/dev/null || true
+  fi
 
   # output: classify locally generated traffic to WAN
   nft 'add chain inet gl-qos mangle_output { type filter hook output priority mangle; policy accept; }' 2>/dev/null || true
@@ -133,12 +164,48 @@ setup_nft() {
 stop_qos() {
   detect_wan
   tc qdisc del dev "$WAN_IF" root 2>/dev/null || true
-  [ -d /sys/class/net/br-lan ] && tc qdisc del dev br-lan root 2>/dev/null || true
-  [ -d /sys/class/net/br-iot ] && tc qdisc del dev br-iot root 2>/dev/null || true
-  [ -d /sys/class/net/br-guest ] && tc qdisc del dev br-guest root 2>/dev/null || true
+  # Dynamically clean up all discovered bridges
+  for br in /sys/class/net/br-*; do
+    [ -d "$br" ] || continue
+    br=$(basename "$br")
+    tc qdisc del dev "$br" root 2>/dev/null || true
+  done
   [ -d /sys/class/net/tailscale0 ] && tc qdisc del dev tailscale0 root 2>/dev/null || true
   has_nft && nft delete table inet gl-qos 2>/dev/null || true
   log_info "Stopped QoS on $WAN_IF"
+}
+
+# ---------- Get bandwidth config for a bridge ----------
+# Maps bridge names to config variables, with sensible defaults.
+# Custom bridges default to lan-like bandwidth.
+# Returns: "up_bw down_bw priority"
+get_bw_config() {
+  local br="$1" config_name up_bw down_bw prio
+  case "$br" in
+    br-lan|lan) config_name="LAN" ;;
+    br-iot|iot) config_name="IOT" ;;
+    br-guest|guest) config_name="GUEST" ;;
+    tailscale0|tailscale) config_name="TAILSCALE" ;;
+    br-*) config_name=$(echo "$br" | sed 's/br-//' | tr '[:lower:]' '[:upper:]') ;;
+    *) config_name=$(echo "$br" | tr '[:lower:]' '[:upper:]') ;;
+  esac
+
+  eval "up_bw=\${QOS_${config_name}_BW_UP:-}"
+  eval "down_bw=\${QOS_${config_name}_BW_DOWN:-}"
+  eval "prio=\${QOS_PRIO_${config_name}:-}"
+
+  # Defaults if not set
+  [ -z "$up_bw" ] && up_bw=200000
+  [ -z "$down_bw" ] && down_bw=500000
+  [ -z "$prio" ] && {
+    case "$config_name" in
+      LAN|TAILSCALE) prio=1 ;;
+      IOT) prio=2 ;;
+      *) prio=3 ;;
+    esac
+  }
+
+  echo "$up_bw $down_bw $prio"
 }
 
 # ---------- WAN-rooted QoS ----------
@@ -157,34 +224,54 @@ apply_wan_rooted_qos() {
       add_qdisc_htb "$WAN_IF" 1 10
       add_htb_class "$WAN_IF" 1: 1:1 "$WAN_BW_UP" "$WAN_BW_UP" 1500 1
 
-      # LAN class
-      add_htb_class "$WAN_IF" 1:1 1:10 "$QOS_LAN_BW_UP" "$WAN_BW_UP" 1500 1
-      add_fw_filter "$WAN_IF" 1: 10 0x10 1:10
-      add_cake_leaf "$WAN_IF" 1:10 10 "besteffort triple-isolate"
+      # Dynamically create per-bridge TC classes
+      local idx=0
+      local br mark bw_data up_bw down_bw prio classid classid_dec bridge_handle
+      for br in /sys/class/net/br-*; do
+        [ -d "$br" ] || continue
+        br=$(basename "$br")
+        idx=$((idx + 1))
+        mark=$((16 + (idx - 1) * 16))
+        bw_data=$(get_bw_config "$br")
+        up_bw=$(echo "$bw_data" | awk '{print $1}')
+        down_bw=$(echo "$bw_data" | awk '{print $2}')
+        prio=$(echo "$bw_data" | awk '{print $3}')
 
-      # IoT class
-      add_htb_class "$WAN_IF" 1:1 1:20 "$QOS_IOT_BW_UP" "$WAN_BW_UP" 1500 2
-      add_fw_filter "$WAN_IF" 1: 20 0x20 1:20
-      add_cake_leaf "$WAN_IF" 1:20 20 "besteffort"
+        local classid="1:$(printf '%x' $((10 + idx * 10)))"
+        local classid_dec=$((10 + idx * 10))
 
-      # Guest class
-      add_htb_class "$WAN_IF" 1:1 1:30 "$QOS_GUEST_BW_UP" "$WAN_BW_UP" 1500 3
-      add_fw_filter "$WAN_IF" 1: 30 0x30 1:30
-      add_cake_leaf "$WAN_IF" 1:30 30 "besteffort"
+        add_htb_class "$WAN_IF" 1:1 "$classid" "$up_bw" "$WAN_BW_UP" 1500 "$prio"
+        add_fw_filter "$WAN_IF" 1: "$classid_dec" "$mark" "$classid"
+        add_cake_leaf "$WAN_IF" "$classid" "$classid_dec" "besteffort triple-isolate"
+      done
 
       # Tailscale class
       if [ -d /sys/class/net/tailscale0 ]; then
-        add_htb_class "$WAN_IF" 1:1 1:40 "$QOS_TAILSCALE_BW_UP" "$WAN_BW_UP" 1500 1
-        add_fw_filter "$WAN_IF" 1: 40 0x40 1:40
-        add_cake_leaf "$WAN_IF" 1:40 40 "besteffort triple-isolate"
+        idx=$((idx + 1))
+        mark=$((16 + (idx - 1) * 16))
+        bw_data=$(get_bw_config "tailscale0")
+        up_bw=$(echo "$bw_data" | awk '{print $1}')
+        prio=$(echo "$bw_data" | awk '{print $3}')
+        local classid="1:$(printf '%x' $((10 + idx * 10)))"
+        local classid_dec=$((10 + idx * 10))
+        add_htb_class "$WAN_IF" 1:1 "$classid" "$up_bw" "$WAN_BW_UP" 1500 "$prio"
+        add_fw_filter "$WAN_IF" 1: "$classid_dec" "$mark" "$classid"
+        add_cake_leaf "$WAN_IF" "$classid" "$classid_dec" "besteffort triple-isolate"
       fi
 
-      # Optional bridge-level shaping for wired LAN
-      if [ -d /sys/class/net/br-lan ]; then
-        add_qdisc_htb br-lan 2 10
-        add_htb_class br-lan 2: 2:10 "$QOS_LAN_BW_UP" "$WAN_BW_UP" 1500 1
-        add_cake_leaf br-lan 2:10 10 "besteffort"
-      fi
+      # Optional bridge-level shaping
+      idx=0
+      for br in /sys/class/net/br-*; do
+        [ -d "$br" ] || continue
+        br=$(basename "$br")
+        idx=$((idx + 1))
+        bw_data=$(get_bw_config "$br")
+        up_bw=$(echo "$bw_data" | awk '{print $1}')
+        bridge_handle=$((2 + idx))
+        add_qdisc_htb "$br" "${bridge_handle}:" 10
+        add_htb_class "$br" "${bridge_handle}:1" "${bridge_handle}:10" "$up_bw" "$WAN_BW_UP" 1500 1
+        add_cake_leaf "$br" "${bridge_handle}:10" 10 "besteffort"
+      done
       ;;
     stop)
       stop_qos
@@ -232,14 +319,53 @@ status() {
   echo "WAN_BW_DOWN: $WAN_BW_DOWN kbit"
   echo "--- tc qdisc ---"
   tc qdisc show dev "$WAN_IF" 2>/dev/null || true
-  [ -d /sys/class/net/br-lan ] && { echo "--- br-lan qdisc ---"; tc qdisc show dev br-lan 2>/dev/null || true; }
+  echo "--- Discovered bridges ---"
+  local idx=0
+  for br in /sys/class/net/br-*; do
+    [ -d "$br" ] || continue
+    br=$(basename "$br")
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))
+    echo "  $br (mark: 0x$(printf '%x' "$mark"))"
+    tc qdisc show dev "$br" 2>/dev/null || true
+  done
   echo "--- nft ---"
   has_nft && nft list table inet gl-qos 2>/dev/null || echo "nft not present"
 }
 
-# ---------- Install / uninstall ----------
+# ---------- Detect VLANs / bridges ----------
+detect_vlans() {
+  echo "=== Detected Bridges / VLANs ==="
+  echo "Discovered via /sys/class/net/br-* and tailscale0:"
+  local idx=0
+  local found=0
+  for br in /sys/class/net/br-*; do
+    [ -d "$br" ] || continue
+    br=$(basename "$br")
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))
+    echo "  $br (fwmark: 0x$(printf '%x' "$mark"))"
+    found=1
+  done
+  if [ -d /sys/class/net/tailscale0 ]; then
+    idx=$((idx + 1))
+    local mark=$((16 + (idx - 1) * 16))
+    echo "  tailscale0 (fwmark: 0x$(printf '%x' "$mark"))"
+    found=1
+  fi
+  [ "$found" -eq 0 ] && echo "  (no bridges found)"
+  echo ""
+
+  echo "=== All network interfaces ==="
+  for iface in /sys/class/net/*; do
+    iface=$(basename "$iface")
+    if [ -d "/sys/class/net/$iface/bridge" ] 2>/dev/null; then
+      echo "  $iface (bridge)"
+    fi
+  done | sort -u
+}
 install() {
-  install -m 0755 "$MAIN_SCRIPT" /usr/local/sbin/glinet-vlan-qos.sh
+  command install -m 0755 "$MAIN_SCRIPT" /usr/local/sbin/glinet-vlan-qos.sh
   log_info "Installed $MAIN_SCRIPT to /usr/local/sbin/glinet-vlan-qos.sh"
 }
 
@@ -273,6 +399,10 @@ case "${1:-}" in
     ;;
   detect)
     detect_model
+    detect_vlans
+    ;;
+  detect-vlans)
+    detect_vlans
     ;;
   install)
     install
@@ -281,7 +411,7 @@ case "${1:-}" in
     uninstall
     ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status|detect|install|uninstall}"
+    echo "Usage: $0 {start|stop|restart|status|detect|detect-vlans|install|uninstall}"
     exit 1
     ;;
 esac
