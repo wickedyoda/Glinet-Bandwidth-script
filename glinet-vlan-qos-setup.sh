@@ -120,6 +120,10 @@ select_priority() {
   for br in /sys/class/net/br-*; do
     [ -d "$br" ] || continue
     br=$(basename "$br")
+    # Skip IFB devices (e.g., br-lan-ifb) — they're for traffic mirroring, not QoS
+    case "$br" in
+      *-ifb) continue ;;
+    esac
     discovered="$discovered $br"
   done
   # Add tailscale0 if present
@@ -127,15 +131,13 @@ select_priority() {
 
   for b in $discovered; do
     read -p "Priority for $b (1-3, 0 to skip): " -r pri
-    local config_name
-    # Convert bridge name to config variable suffix (e.g., br-lan -> LAN)
     case "$b" in
       br-lan|lan) config_name="LAN" ;;
       br-iot|iot) config_name="IOT" ;;
       br-guest|guest) config_name="GUEST" ;;
       tailscale0|tailscale) config_name="TAILSCALE" ;;
-      br-*) config_name=$(echo "$b" | sed 's/br-//' | tr '[:lower:]' '[:upper:]') ;;
-      *) config_name=$(echo "$b" | tr '[:lower:]' '[:upper:]') ;;
+      br-*) config_name=$(echo "$b" | sed 's/br-//' | tr '[:lower:]' '[:upper:]' | tr '-' '_') ;;
+      *) config_name=$(echo "$b" | tr '[:lower:]' '[:upper:]' | tr '-' '_') ;;
     esac
 
     case "$pri" in
@@ -218,8 +220,8 @@ write_config() {
         br-iot|iot) config_name="IOT" ;;
         br-guest|guest) config_name="GUEST" ;;
         tailscale0|tailscale) config_name="TAILSCALE" ;;
-        br-*) config_name=$(echo "$br" | sed 's/br-//' | tr '[:lower:]' '[:upper:]') ;;
-        *) config_name=$(echo "$br" | tr '[:lower:]' '[:upper:]') ;;
+        br-*) config_name=$(echo "$br" | sed 's/br-//' | tr '[:lower:]' '[:upper:]' | tr '-' '_') ;;
+        *) config_name=$(echo "$br" | tr '[:lower:]' '[:upper:]' | tr '-' '_') ;;
       esac
 
       # Use stored bandwidth if available, otherwise default
