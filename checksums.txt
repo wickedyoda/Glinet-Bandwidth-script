@@ -1,2 +1,2 @@
 f3f9c3b78f3df03574a1f0a1e28a9bd5315f0c462437af162671cfddf20f2a38  glinet-vlan-qos.sh
-77857db4cc80629f5897d1026764f51721de82c2b70c98b6f61693fc1a6b90c7  glinet-vlan-qos-setup.sh
+fe648e9f4b191dcfeb421a79e3e0b5667484fa6a6e434a3a3029ffe73c1e5a19  glinet-vlan-qos-setup.sh
